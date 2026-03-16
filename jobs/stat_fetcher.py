@@ -76,6 +76,7 @@ def name_variants(name):
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 
 def get_db():
+    print(DB_PATH)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
