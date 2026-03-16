@@ -43,7 +43,7 @@
     <div class="cat-grid" style="margin-bottom:1rem">
       {% for cat in group_cats %}
       {% set info = cats.get(cat, {}) %}
-      <div class="cat-item {{ 'cat-tie' if info.get('winner') == 'Tie' }}">
+      <div class="cat-item {{ 'cat-tie' if info.get('winner') == 'Tie' else ('cat-winner-' ~ info.get('winner','') | lower | replace(' ','') if info.get('winner') and info.get('winner') != '—' else '') }}">
         <div class="cat-name">{{ cat }}</div>
         <div class="cat-winner">{{ info.get('winner', '—') }}</div>
         <div class="cat-values">

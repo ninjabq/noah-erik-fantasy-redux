@@ -195,8 +195,9 @@ tr:hover td { background: rgba(255,255,255,.025); }
 
 /* ── Category summary ────────────────────────────────────────────── */
 .cat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: .75rem;
 }
 .cat-item {
@@ -205,7 +206,11 @@ tr:hover td { background: rgba(255,255,255,.025); }
   border-radius: var(--radius);
   padding: 1.1rem 1rem;
   text-align: center;
+  min-width: 120px;
+  flex: 0 0 auto;
 }
+.cat-item.cat-winner-noah  { background: rgba(245,166,35,.18); border-color: rgba(245,166,35,.4); }
+.cat-item.cat-winner-erik  { background: rgba(59,130,246,.18); border-color: rgba(59,130,246,.4); }
 .cat-name {
   font-family: var(--font-mono);
   font-size: .75rem; letter-spacing: .12em;
@@ -214,12 +219,12 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .cat-winner {
   font-family: var(--font-display);
   font-size: 1.5rem; letter-spacing: .06em;
-  color: var(--green);
+  color: var(--text); font-weight: 700;
 }
-.cat-tie .cat-winner { color: var(--text-dim); }
+.cat-tie .cat-winner { color: var(--text-dim); font-weight: 400; }
 .cat-values { margin-top: .5rem; display: flex; flex-direction: column; align-items: center; gap: .15rem; }
 .cat-val { font-family: var(--font-mono); font-size: .75rem; color: var(--text-dim); }
-.cat-val-win { color: var(--green); }
+.cat-val-win { color: var(--text); font-weight: 600; }
 
 /* ── Week page ───────────────────────────────────────────────────── */
 .page-week {}
@@ -535,13 +540,15 @@ tr:hover td { background: rgba(255,255,255,.025); }
   background: var(--bg-card2); border: 1px solid var(--border);
   border-radius: 6px; padding: .65rem 1rem; min-width: 84px;
 }
-.cur-cat-chip.chip-tie { opacity: .6; }
+.cur-cat-chip.chip-noah  { background: rgba(245,166,35,.18); border-color: rgba(245,166,35,.4); }
+.cur-cat-chip.chip-erik  { background: rgba(59,130,246,.18); border-color: rgba(59,130,246,.4); }
+.cur-cat-chip.chip-tie   { opacity: .6; }
 .cur-cat-name {
   font-family: var(--font-mono); font-size: .7rem;
   letter-spacing: .1em; color: var(--text); margin-bottom: .2rem;
 }
-.cur-cat-winner { font-family: var(--font-display); font-size: 1.15rem; color: var(--green); }
-.chip-tie .cur-cat-winner { color: var(--text-dim); }
+.cur-cat-winner { font-family: var(--font-display); font-size: 1.15rem; color: var(--text); font-weight: 700; }
+.chip-tie .cur-cat-winner { color: var(--text-dim); font-weight: 400; }
 .cur-week-score { display: flex; align-items: center; justify-content: center; gap: .75rem; font-family: var(--font-display); font-size: 1.1rem; }
 .cws-wins { color: var(--accent2); }
 .cws-label { font-size: .65rem; color: var(--text-mute); font-family: var(--font-mono); margin-left: .2rem; }
