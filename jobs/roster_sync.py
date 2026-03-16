@@ -38,48 +38,48 @@ def strip_accents(text):
 
 def _get_roster_for_team(team_id):
     """
-    Try multiple approaches to fetch a team roster, returning a list of
-    raw roster entry dicts. Returns [] on total failure.
+    Fetch players for a team across multiple roster types and merge them.
+    Returns a deduplicated list of roster entry dicts keyed by person.id.
+    Uses direct HTTP requests for reliability.
     """
-    # Approach 1: statsapi.roster() helper (MLB-StatsAPI >= 1.3)
-    try:
-        raw = mlb.roster(team_id, rosterType='fullRoster')
-        # roster() returns a formatted string — we need the raw JSON instead
-        # so fall through to approach 2 which uses get() directly
-    except Exception:
-        pass
+    import requests
 
-    # Approach 2: mlb.get() with team_roster endpoint
-    for endpoint in ('team_roster', 'roster'):
-        for roster_type in ('fullRoster', '40Man', 'active'):
-            try:
-                data = mlb.get(endpoint, {
-                    'teamId': team_id,
-                    'rosterType': roster_type,
-                })
-                entries = data.get('roster', [])
-                if entries:
-                    return entries
-            except Exception:
-                continue
+    # Fetch these roster types and merge — nonRosterInvitees adds Spring Training
+    # call-ups who aren't yet on the 40-man roster
+    roster_types = ('fullRoster', 'nonRosterInvitees')
+    seen_ids = set()
+    all_entries = []
 
-    # Approach 3: direct URL via requests (bypasses statsapi endpoint registry)
-    try:
-        import requests
-        for roster_type in ('fullRoster', '40Man', 'active'):
+    for roster_type in roster_types:
+        try:
             url = (
                 f'https://statsapi.mlb.com/api/v1/teams/{team_id}/roster'
                 f'?rosterType={roster_type}'
             )
             resp = requests.get(url, timeout=10)
-            if resp.ok:
-                entries = resp.json().get('roster', [])
-                if entries:
-                    return entries
-    except Exception:
-        pass
+            if not resp.ok:
+                continue
+            for entry in resp.json().get('roster', []):
+                pid = entry.get('person', {}).get('id')
+                if pid and pid not in seen_ids:
+                    seen_ids.add(pid)
+                    all_entries.append(entry)
+        except Exception:
+            continue
 
-    return []
+    # Fallback to statsapi if requests failed entirely
+    if not all_entries:
+        for endpoint in ('team_roster', 'roster'):
+            for roster_type in ('fullRoster', '40Man', 'active'):
+                try:
+                    data = mlb.get(endpoint, {'teamId': team_id, 'rosterType': roster_type})
+                    entries = data.get('roster', [])
+                    if entries:
+                        return entries
+                except Exception:
+                    continue
+
+    return all_entries
 
 
 def sync_mlb_roster():
