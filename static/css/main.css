@@ -203,21 +203,22 @@ tr:hover td { background: rgba(255,255,255,.025); }
   background: var(--bg-card2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: .9rem 1rem;
+  padding: 1.1rem 1rem;
+  text-align: center;
 }
 .cat-name {
   font-family: var(--font-mono);
-  font-size: .65rem; letter-spacing: .12em;
-  color: var(--text-mute); margin-bottom: .3rem;
+  font-size: .75rem; letter-spacing: .12em;
+  color: var(--text); margin-bottom: .35rem;
 }
 .cat-winner {
   font-family: var(--font-display);
-  font-size: 1.3rem; letter-spacing: .06em;
+  font-size: 1.5rem; letter-spacing: .06em;
   color: var(--green);
 }
 .cat-tie .cat-winner { color: var(--text-dim); }
-.cat-values { margin-top: .4rem; display: flex; flex-direction: column; gap: .1rem; }
-.cat-val { font-family: var(--font-mono); font-size: .7rem; color: var(--text-dim); }
+.cat-values { margin-top: .5rem; display: flex; flex-direction: column; align-items: center; gap: .15rem; }
+.cat-val { font-family: var(--font-mono); font-size: .75rem; color: var(--text-dim); }
 .cat-val-win { color: var(--green); }
 
 /* ── Week page ───────────────────────────────────────────────────── */
@@ -507,11 +508,12 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .ww-name  { font-size: .72rem; color: var(--text-dim); }
 .ww-sep   { color: var(--text-mute); font-size: .8rem; }
 
-.cur-week-cats-group { margin-bottom: .5rem; }
+.cur-week-cats-group { margin-bottom: .5rem; text-align: center; }
 .cur-cats-label {
   font-family: var(--font-mono); font-size: .65rem;
   letter-spacing: .12em; text-transform: uppercase;
   color: var(--text-mute); margin: .6rem 0 .35rem;
+  text-align: center;
 }
 
 /* ── Current week summary (home) ─────────────────────────────── */
@@ -527,20 +529,20 @@ tr:hover td { background: rgba(255,255,255,.025); }
   transition: all .15s;
 }
 .btn-detail:hover { background: var(--bg-card2); border-color: var(--border-hi); }
-.cur-week-cats { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.cur-week-cats { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; margin-bottom: 1rem; }
 .cur-cat-chip {
   display: flex; flex-direction: column; align-items: center;
   background: var(--bg-card2); border: 1px solid var(--border);
-  border-radius: 6px; padding: .45rem .7rem; min-width: 72px;
+  border-radius: 6px; padding: .65rem 1rem; min-width: 84px;
 }
 .cur-cat-chip.chip-tie { opacity: .6; }
 .cur-cat-name {
-  font-family: var(--font-mono); font-size: .6rem;
-  letter-spacing: .1em; color: var(--text-mute); margin-bottom: .15rem;
+  font-family: var(--font-mono); font-size: .7rem;
+  letter-spacing: .1em; color: var(--text); margin-bottom: .2rem;
 }
-.cur-cat-winner { font-family: var(--font-display); font-size: 1rem; color: var(--green); }
+.cur-cat-winner { font-family: var(--font-display); font-size: 1.15rem; color: var(--green); }
 .chip-tie .cur-cat-winner { color: var(--text-dim); }
-.cur-week-score { display: flex; align-items: center; gap: .75rem; font-family: var(--font-display); font-size: 1.1rem; }
+.cur-week-score { display: flex; align-items: center; justify-content: center; gap: .75rem; font-family: var(--font-display); font-size: 1.1rem; }
 .cws-wins { color: var(--accent2); }
 .cws-label { font-size: .65rem; color: var(--text-mute); font-family: var(--font-mono); margin-left: .2rem; }
 .empty-note { color: var(--text-mute); font-size: .88rem; }
