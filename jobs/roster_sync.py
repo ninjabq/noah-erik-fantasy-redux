@@ -88,7 +88,12 @@ def sync_mlb_roster():
     Safe to run repeatedly — uses INSERT OR REPLACE.
     """
     print("[roster_sync] Starting MLB roster sync...")
-    today = date.today().isoformat()
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as _dt
+        today = _dt.now(ZoneInfo('America/New_York')).date().isoformat()
+    except Exception:
+        today = date.today().isoformat()
 
     # Fetch all MLB teams
     try:

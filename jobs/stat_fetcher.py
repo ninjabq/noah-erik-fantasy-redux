@@ -170,8 +170,24 @@ def get_game_ids(start_date_str, end_date_str, include_spring_training=False):
 def get_boxscores(game_ids):
     return [mlb.boxscore_data(gid) for gid in game_ids]
 
+def _today_et():
+    """Return today's date in US Eastern time — matches MLB schedule reference timezone."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as _dt
+        return _dt.now(ZoneInfo('America/New_York')).date()
+    except Exception:
+        try:
+            import pytz
+            from datetime import datetime as _dt
+            return _dt.now(pytz.timezone('America/New_York')).date()
+        except Exception:
+            # Final fallback: UTC-4 (EDT) offset — safe enough
+            from datetime import datetime as _dt, timezone, timedelta as _td
+            return (_dt.now(timezone.utc) - _td(hours=4)).date()
+
 def get_today_game_ids():
-    today = datetime.today().strftime('%Y-%m-%d')
+    today = _today_et().strftime('%Y-%m-%d')
     sched = mlb.get('schedule', {'date': today, 'sportId': 1})
     ids = []
     try:

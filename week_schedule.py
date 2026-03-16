@@ -69,9 +69,24 @@ def week_dates(n):
     return s.strftime('%Y-%m-%d'), e.strftime('%Y-%m-%d')
 
 
+def _today_et():
+    """Return today's date in US Eastern time."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as _dt
+        return _dt.now(ZoneInfo('America/New_York')).date()
+    except Exception:
+        try:
+            import pytz
+            from datetime import datetime as _dt
+            return _dt.now(pytz.timezone('America/New_York')).date()
+        except Exception:
+            from datetime import datetime as _dt, timezone, timedelta as _td
+            return (_dt.now(timezone.utc) - _td(hours=4)).date()
+
 def current_week():
-    """Return the current week number based on today's date."""
-    today = date.today()
+    """Return the current week number based on today's date (ET)."""
+    today = _today_et()
     for wnum, start, end in WEEKS:
         if start <= today <= end:
             return wnum
