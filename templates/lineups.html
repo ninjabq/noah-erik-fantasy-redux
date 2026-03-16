@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Lineups — Week {{ week_num }}{% endblock %}
+
+{% block content %}
+<div class="page-lineups">
+  <div class="lineups-top-bar">
+    <h1 class="page-title">LINEUPS</h1>
+    <div class="week-jump-wrap">
+      <select class="week-jump-select" onchange="location.href='/lineups/'+this.value">
+        {% for wnum, label in week_options %}
+        <option value="{{ wnum }}" {% if wnum == week_num %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="lineups-grid">
+    {% for manager in managers %}
+    {% set perm_list = perms.get(manager, []) %}
+    {% set lineup    = lineups.get(manager, {}) %}
+
+    {# Separate active permanents by type — is_backup is 0/1 integer from SQLite #}
+    {% set active_perm_batters  = perm_list | selectattr('is_backup',  'equalto', 0)
+                                            | selectattr('position_type', 'equalto', 'batter')
+                                            | list %}
+    {% set active_perm_pitchers = perm_list | selectattr('is_backup',  'equalto', 0)
+                                            | selectattr('position_type', 'equalto', 'pitcher')
+                                            | list %}
+    {% set backup_batters       = perm_list | selectattr('is_backup',  'equalto', 1)
+                                            | selectattr('position_type', 'equalto', 'batter')
+                                            | list %}
+    {% set backup_pitchers      = perm_list | selectattr('is_backup',  'equalto', 1)
+                                            | selectattr('position_type', 'equalto', 'pitcher')
+                                            | list %}
+
+    <div class="lineup-panel">
+      <div class="lineup-mgr-header">{{ manager }}</div>
+
+      {# ── Hitters ─────────────────────────────────────────────────── #}
+      <div class="lineup-section-label">Hitters</div>
+      {% set hit_slots = [
+        ('C',  'C-0'),
+        ('1B', '1B-0'),
+        ('2B', '2B-0'),
+        ('3B', '3B-0'),
+        ('SS', 'SS-0'),
+        ('OF', 'OF-0'),
+        ('OF', 'OF-1'),
+        ('OF', 'OF-2'),
+        ('DH', 'DH-0'),
+      ] %}
+      {% for pos, slot_key in hit_slots %}
+        {% set existing = lineup.get(slot_key) %}
+        {% set prefill  = existing.name if existing else '' %}
+        {% set is_perm  = (existing.is_permanent == 1) if existing else false %}
+        <div class="lineup-row">
+          <span class="slot-pos">{{ pos }}</span>
+          <div class="autocomplete-wrap">
+            <input
+              class="lineup-input {{ 'is-permanent' if is_perm }}"
+              type="text"
+              placeholder="Search player…"
+              data-manager="{{ manager }}"
+              data-position="{{ slot_key }}"
+              data-week="{{ save_week }}"
+              data-position-type="batter"
+              data-position-filter="{{ pos }}"
+              data-is-permanent="{{ '1' if is_perm else '0' }}"
+              value="{{ prefill }}"
+              autocomplete="off"
+            >
+            <div class="autocomplete-dropdown" style="display:none"></div>
+          </div>
+          <span class="validation-icon"></span>
+          <button class="slot-remove-btn" title="Clear slot">×</button>
+        </div>
+      {% endfor %}
+
+      {# ── Pitchers ────────────────────────────────────────────────── #}
+      <div class="lineup-section-label">Pitchers</div>
+      {% set pit_slots = [
+        ('SP', 'SP-0'),
+        ('SP', 'SP-1'),
+        ('SP', 'SP-2'),
+        ('SP', 'SP-3'),
+        ('SP', 'SP-4'),
+        ('RP', 'RP-0'),
+        ('RP', 'RP-1'),
+        ('RP', 'RP-2'),
+      ] %}
+      {% for pos, slot_key in pit_slots %}
+        {% set existing = lineup.get(slot_key) %}
+        {% set prefill  = existing.name if existing else '' %}
+        {% set is_perm  = (existing.is_permanent == 1) if existing else false %}
+        <div class="lineup-row">
+          <span class="slot-pos">{{ pos }}</span>
+          <div class="autocomplete-wrap">
+            <input
+              class="lineup-input {{ 'is-permanent' if is_perm }}"
+              type="text"
+              placeholder="Search player…"
+              data-manager="{{ manager }}"
+              data-position="{{ slot_key }}"
+              data-week="{{ save_week }}"
+              data-position-type="pitcher"
+              data-position-filter="{{ pos }}"
+              data-is-permanent="{{ '1' if is_perm else '0' }}"
+              value="{{ prefill }}"
+              autocomplete="off"
+            >
+            <div class="autocomplete-dropdown" style="display:none"></div>
+          </div>
+          <span class="validation-icon"></span>
+          <button class="slot-remove-btn" title="Clear slot">×</button>
+        </div>
+      {% endfor %}
+
+      {# ── Permanent / backup reference panel ───────────────────────── #}
+      <div class="perm-quickfill">
+
+        {% if active_perm_batters or active_perm_pitchers %}
+        <div class="perm-qf-label">Permanent Players</div>
+
+        {% if active_perm_batters %}
+        <div class="perm-qf-sublabel">Hitters</div>
+        {% for pp in active_perm_batters %}
+          <button class="perm-qf-btn {{ 'swapped-out' if pp.has_been_swapped }}"
+            data-manager="{{ manager }}"
+            data-player="{{ pp.name }}"
+            data-mlb-id="{{ pp.mlb_id or '' }}"
+            data-pos-type="{{ pp.position_type }}"
+            data-position="{{ pp.position }}">
+            {{ pp.name }}
+            <span class="perm-pos-tag">{{ pp.position }}</span>
+          </button>
+        {% endfor %}
+        {% endif %}
+
+        {% if active_perm_pitchers %}
+        <div class="perm-qf-sublabel">Pitchers</div>
+        {% for pp in active_perm_pitchers %}
+          <button class="perm-qf-btn {{ 'swapped-out' if pp.has_been_swapped }}"
+            data-manager="{{ manager }}"
+            data-player="{{ pp.name }}"
+            data-mlb-id="{{ pp.mlb_id or '' }}"
+            data-pos-type="{{ pp.position_type }}"
+            data-position="{{ pp.position }}">
+            {{ pp.name }}
+            <span class="perm-pos-tag">{{ pp.position }}</span>
+          </button>
+        {% endfor %}
+        {% endif %}
+        {% endif %}
+
+        {% if backup_batters or backup_pitchers %}
+        <div class="perm-qf-label" style="margin-top:.75rem">Backup Players</div>
+
+        {% if backup_batters %}
+        <div class="perm-qf-sublabel">Hitters</div>
+        {% for pp in backup_batters %}
+          <button class="perm-qf-btn backup {{ 'swapped-in' if pp.has_been_swapped }}"
+            data-manager="{{ manager }}"
+            data-player="{{ pp.name }}"
+            data-mlb-id="{{ pp.mlb_id or '' }}"
+            data-pos-type="{{ pp.position_type }}"
+            data-position="{{ pp.position }}">
+            {{ pp.name }}
+            <span class="perm-pos-tag">{{ pp.position }}</span>
+          </button>
+        {% endfor %}
+        {% endif %}
+
+        {% if backup_pitchers %}
+        <div class="perm-qf-sublabel">Pitchers</div>
+        {% for pp in backup_pitchers %}
+          <button class="perm-qf-btn backup {{ 'swapped-in' if pp.has_been_swapped }}"
+            data-manager="{{ manager }}"
+            data-player="{{ pp.name }}"
+            data-mlb-id="{{ pp.mlb_id or '' }}"
+            data-pos-type="{{ pp.position_type }}"
+            data-position="{{ pp.position }}">
+            {{ pp.name }}
+            <span class="perm-pos-tag">{{ pp.position }}</span>
+          </button>
+        {% endfor %}
+        {% endif %}
+        {% endif %}
+
+      </div>{# end perm-quickfill #}
+    </div>{# end lineup-panel #}
+    {% endfor %}
+  </div>{# end lineups-grid #}
+
+  {# ── Used temporary players by position ─────────────────────────── #}
+  <section class="card used-section">
+    <h2 class="card-title">Used Temporary Players</h2>
+    <div class="used-grid">
+      {% for manager in managers %}
+      <div class="used-panel">
+        <div class="used-mgr-name">{{ manager }}</div>
+        {% set used_list = used.get(manager, []) %}
+        {% if used_list %}
+          {% for pos_code, pos_label in [
+              ('C','Catcher'), ('1B','First Base'), ('2B','Second Base'),
+              ('3B','Third Base'), ('SS','Shortstop'), ('OF','Outfield'),
+              ('DH','DH'), ('SP','Starting Pitcher'), ('RP','Relief Pitcher')
+          ] %}
+            {% set pos_players = used_list | selectattr('position', 'equalto', pos_code) | list %}
+            {% if pos_players %}
+            <div class="used-pos-group">
+              <span class="used-pos-label">{{ pos_label }}</span>
+              <div class="used-tags">
+                {% for p in pos_players %}
+                <span class="used-tag">{{ p.name }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <span class="used-empty">None yet</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const USED_BY_MANAGER = {{ used | tojson }};
+  const USED_THIS_WEEK  = {{ used_this_week | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/lineups.js') }}"></script>
+{% endblock %}

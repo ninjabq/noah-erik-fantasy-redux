@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: fantasy-baseball
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 2 --timeout 120
+    envVars:
+      - key: DB_PATH
+        value: /data/fantasy.db
+    disk:
+      name: fantasy-db
+      mountPath: /data
+      sizeGB: 1

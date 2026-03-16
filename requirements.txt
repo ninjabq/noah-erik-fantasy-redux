@@ -1,0 +1,5 @@
+flask>=3.0
+apscheduler>=3.10
+MLB-StatsAPI==1.9.0
+python-mlb-statsapi==0.7.2
+gunicorn>=21.0

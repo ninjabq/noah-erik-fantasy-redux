@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Week {{ n }} — Fantasy Baseball{% endblock %}
+
+{% block content %}
+{# Macro: returns cell-win / cell-loss / cell-tie / '' based on category winner #}
+{% macro cat_class(cat_name, manager_name) %}
+{% set w = cats.get(cat_name, {}).get('winner') %}
+{% if w == manager_name %}cell-win{% elif w == 'Tie' %}cell-tie{% elif w %}cell-loss{% endif %}
+{% endmacro %}
+<div class="page-week">
+
+  <div class="week-nav-bar">
+    {% if n > 0 %}
+    <a href="/week/{{ n-1 }}" class="week-arrow">← Wk {{ n-1 }}</a>
+    {% else %}
+    <span class="week-arrow disabled">←</span>
+    {% endif %}
+    <div class="week-jump-wrap">
+      <select class="week-jump-select" onchange="location.href='/week/'+this.value">
+        {% for wnum, label in week_options %}
+        <option value="{{ wnum }}" {% if wnum == n %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button id="update-stats-btn" class="week-arrow update-btn" onclick="triggerStatUpdate(this)">
+      ↻ Update Stats
+    </button>
+    {% if n < max_week %}
+    <a href="/week/{{ n+1 }}" class="week-arrow">Wk {{ n+1 }} →</a>
+    {% else %}
+    <span class="week-arrow disabled">→</span>
+    {% endif %}
+  </div>
+
+  <h1 class="week-title">WEEK <span>{{ n }}</span></h1>
+
+  <section class="card cat-summary-card">
+    <h2 class="card-title">Category Results</h2>
+    {% set hit_cats = ['SLG','RBI','BB','SB','K'] %}
+    {% set pit_cats = ['ERA','WHIP','SO','QS','SV+HD-BS'] %}
+    {% for group_label, group_cats in [('Hitting', hit_cats), ('Pitching', pit_cats)] %}
+    <div class="cur-cats-label">{{ group_label }}</div>
+    <div class="cat-grid" style="margin-bottom:1rem">
+      {% for cat in group_cats %}
+      {% set info = cats.get(cat, {}) %}
+      <div class="cat-item {{ 'cat-tie' if info.get('winner') == 'Tie' }}">
+        <div class="cat-name">{{ cat }}</div>
+        <div class="cat-winner">{{ info.get('winner', '—') }}</div>
+        <div class="cat-values">
+          {% for name in manager_names %}
+          <span class="cat-val {{ 'cat-val-win' if info.get('winner') == name }}">
+            {{ name }}: {{ info.get(name, '—') }}
+          </span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </section>
+
+  {# Build lookup maps for each manager's rows by slot key #}
+  {% for name in manager_names %}
+  {% set mdata = data.get(name, {}) %}
+  {% set batter_map  = {} %}
+  {% set pitcher_map = {} %}
+  {% for b in mdata.get('batters',  []) %}{% if batter_map.update({b.lineup_position: b}) %}{% endif %}{% endfor %}
+  {% for p in mdata.get('pitchers', []) %}{% if pitcher_map.update({p.lineup_position: p}) %}{% endif %}{% endfor %}
+
+  <section class="card manager-week-card">
+    <h2 class="card-title manager-title">{{ name }}</h2>
+
+    <div class="table-label">Hitters</div>
+    <div class="table-scroll">
+      <table class="stat-table">
+        <thead>
+          <tr>
+            <th>POS</th><th>Player</th><th>Team</th>
+            <th>1B</th><th>2B</th><th>3B</th><th>HR</th><th>AB</th>
+            <th class="score-sep">SLG</th><th>RBI</th><th>BB</th><th>SB</th><th>K</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set hit_slots = ['C-0','1B-0','2B-0','3B-0','SS-0','OF-0','OF-1','OF-2','DH-0'] %}
+          {% for slot in hit_slots %}
+          {% set b = batter_map.get(slot) %}
+          <tr>
+            <td class="pos-cell">{{ slot_display(slot) }}</td>
+            {% if b %}
+            <td class="name-cell">{{ b.name }}</td>
+            <td class="team-cell">{{ b.team or '—' }}</td>
+            <td>{{ b.singles }}</td><td>{{ b.doubles }}</td>
+            <td>{{ b.triples }}</td><td>{{ b.homeruns }}</td><td>{{ b.ab }}</td>
+            <td class="score-sep">{{ '%.3f'|format(b.slg) }}</td>
+            <td>{{ b.rbi }}</td><td>{{ b.bb }}</td><td>{{ b.sb }}</td><td>{{ b.k }}</td>
+            {% else %}
+            <td class="name-cell empty-slot">—</td>
+            <td colspan="11" class="empty-slot"></td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% set all_batters = [] %}
+        {% for slot in ['C-0','1B-0','2B-0','3B-0','SS-0','OF-0','OF-1','OF-2','DH-0'] %}
+          {% if batter_map.get(slot) %}{% set _ = all_batters.append(batter_map[slot]) %}{% endif %}
+        {% endfor %}
+        {% if all_batters %}
+        {% set tot_ab = all_batters|sum(attribute='ab') %}
+        {% set tot_tb = all_batters|sum(attribute='total_bases') %}
+        <tfoot>
+          <tr class="totals-row">
+            <td colspan="3">TOT</td>
+            <td>{{ all_batters|sum(attribute='singles') }}</td>
+            <td>{{ all_batters|sum(attribute='doubles') }}</td>
+            <td>{{ all_batters|sum(attribute='triples') }}</td>
+            <td>{{ all_batters|sum(attribute='homeruns') }}</td>
+            <td>{{ tot_ab }}</td>
+            <td class="score-sep {{ cat_class('SLG', name) }}">
+              {{ '%.3f'|format(tot_tb/tot_ab) if tot_ab else '—' }}
+            </td>
+            <td class="{{ cat_class('RBI', name) }}">{{ all_batters|sum(attribute='rbi') }}</td>
+            <td class="{{ cat_class('BB', name) }}">{{ all_batters|sum(attribute='bb') }}</td>
+            <td class="{{ cat_class('SB', name) }}">{{ all_batters|sum(attribute='sb') }}</td>
+            <td class="{{ cat_class('K', name) }}">{{ all_batters|sum(attribute='k') }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
+      </table>
+    </div>
+
+    <div class="table-label" style="margin-top:1.5rem">Pitchers</div>
+    <div class="table-scroll">
+      <table class="stat-table">
+        <thead>
+          <tr>
+            <th>POS</th><th>Player</th><th>Team</th>
+            <th>IP</th><th>ER</th><th>H</th><th>BB</th>
+            <th>SV</th><th>HD</th><th>BS</th>
+            <th class="score-sep">ERA</th><th>WHIP</th><th>SO</th><th>QS</th><th>SV+HD-BS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set pit_slots = ['SP-0','SP-1','SP-2','SP-3','SP-4','RP-0','RP-1','RP-2'] %}
+          {% for slot in pit_slots %}
+          {% set p = pitcher_map.get(slot) %}
+          <tr>
+            <td class="pos-cell">{{ slot_display(slot) }}</td>
+            {% if p %}
+            <td class="name-cell">{{ p.name }}</td>
+            <td class="team-cell">{{ p.team or '—' }}</td>
+            <td>{{ p.ip }}</td><td>{{ p.er }}</td><td>{{ p.h }}</td><td>{{ p.p_bb }}</td>
+            <td>{{ p.sv }}</td><td>{{ p.hd }}</td><td>{{ p.bs }}</td>
+            <td class="score-sep">{{ '%.2f'|format(p.era) }}</td>
+            <td>{{ '%.2f'|format(p.whip) }}</td>
+            <td>{{ p.so }}</td><td>{{ p.qs }}</td><td>{{ p.sv_hd_bs }}</td>
+            {% else %}
+            <td class="name-cell empty-slot">—</td>
+            <td colspan="13" class="empty-slot"></td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% set all_pitchers = [] %}
+        {% for slot in ['SP-0','SP-1','SP-2','SP-3','SP-4','RP-0','RP-1','RP-2'] %}
+          {% if pitcher_map.get(slot) %}{% set _ = all_pitchers.append(pitcher_map[slot]) %}{% endif %}
+        {% endfor %}
+        {% if all_pitchers %}
+        {% set tot_ip  = all_pitchers|sum(attribute='ip') %}
+        {% set tot_er  = all_pitchers|sum(attribute='er') %}
+        {% set tot_hbb = all_pitchers|sum(attribute='h_plus_bb') %}
+        <tfoot>
+          <tr class="totals-row">
+            <td colspan="3">TOT</td>
+            <td>{{ '%.1f'|format(tot_ip) }}</td>
+            <td>{{ tot_er }}</td>
+            <td>{{ all_pitchers|sum(attribute='h') }}</td>
+            <td>{{ all_pitchers|sum(attribute='p_bb') }}</td>
+            <td>{{ all_pitchers|sum(attribute='sv') }}</td>
+            <td>{{ all_pitchers|sum(attribute='hd') }}</td>
+            <td>{{ all_pitchers|sum(attribute='bs') }}</td>
+            <td class="score-sep {{ cat_class('ERA', name) }}">
+              {{ '%.2f'|format(tot_er/tot_ip*9) if tot_ip else '—' }}
+            </td>
+            <td class="{{ cat_class('WHIP', name) }}">
+              {{ '%.2f'|format(tot_hbb/tot_ip) if tot_ip else '—' }}
+            </td>
+            <td class="{{ cat_class('SO', name) }}">{{ all_pitchers|sum(attribute='so') }}</td>
+            <td class="{{ cat_class('QS', name) }}">{{ all_pitchers|sum(attribute='qs') }}</td>
+            <td class="{{ cat_class('SV+HD-BS', name) }}">{{ all_pitchers|sum(attribute='sv_hd_bs') }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
+      </table>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function triggerStatUpdate(btn) {
+  const orig = btn.textContent;
+  btn.textContent = "Updating…";
+  btn.disabled = true;
+  try {
+    const res  = await fetch("/api/stat_update", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = "✓ Started";
+      // Reload page after a few seconds to show new stats
+      setTimeout(() => location.reload(), 4000);
+    } else {
+      btn.textContent = "Error";
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = "Error";
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

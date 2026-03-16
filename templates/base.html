@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>{% block title %}Fantasy Baseball{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<div class="grain"></div>
+<header class="site-header">
+  <div class="header-inner">
+    <a href="/" class="logo">
+      <span class="logo-diamond">◆</span>
+      <span class="logo-text">FANTASY<br><em>BASEBALL</em></span>
+    </a>
+    <nav class="site-nav">
+      <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Home</a>
+      <a href="/week/{{ week_num|default(1) }}" class="nav-link {% if request.path.startswith('/week') %}active{% endif %}">This Week</a>
+      <a href="/lineups" class="nav-link {% if request.path == '/lineups' %}active{% endif %}">Lineups</a>
+      <a href="/roster" class="nav-link {% if request.path == '/roster' %}active{% endif %}">Roster</a>
+    </nav>
+  </div>
+</header>
+
+<main class="site-main">
+{% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  <span>Fantasy Baseball — Season 2025</span>
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

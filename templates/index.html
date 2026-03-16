@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Home — Fantasy Baseball{% endblock %}
+
+{% block content %}
+<div class="page-home">
+
+  <!-- ── Season scoreboard ─────────────────────────────────── -->
+  <section class="scoreboard-hero">
+    <div class="scoreboard-label">TOTAL CATEGORY WINS — 2026 SEASON</div>
+    <div class="scoreboard-managers">
+      {% for name in manager_names %}
+      <div class="scoreboard-manager">
+        <div class="mgr-name">{{ name }}</div>
+        <div class="mgr-score {% if totals.get(name,0) > totals.get(manager_names[1-loop.index0],0) %}is-leading{% endif %}">
+          {{ totals.get(name, 0) }}
+        </div>
+      </div>
+      {% if loop.first %}<div class="scoreboard-vs">VS</div>{% endif %}
+      {% endfor %}
+    </div>
+
+    <!-- Weeks won row -->
+    <div class="weeks-won-row">
+      {% for name in manager_names %}
+      <div class="ww-item {% if weeks_won.get(name,0) > weeks_won.get(manager_names[1-loop.index0],0) %}ww-leading{% endif %}">
+        <span class="ww-count">{{ weeks_won.get(name, 0) }}</span>
+        <span class="ww-label">week{{ 's' if weeks_won.get(name,0) != 1 }} won</span>
+        <span class="ww-name">{{ name }}</span>
+      </div>
+      {% if loop.first %}<div class="ww-sep">—</div>{% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ── Current week summary ──────────────────────────────── -->
+  <section class="card cur-week-card">
+    <div class="cur-week-header">
+      <h2 class="card-title">Week {{ week_num }} — Current Standings</h2>
+      <a href="/week/{{ week_num }}" class="btn-detail">Full Detail →</a>
+    </div>
+    {% if cur_week_cats %}
+    {% set hit_cats  = ['SLG','RBI','BB','SB','K'] %}
+    {% set pit_cats  = ['ERA','WHIP','SO','QS','SV+HD-BS'] %}
+    <div class="cur-week-cats-group">
+      <div class="cur-cats-label">Hitting</div>
+      <div class="cur-week-cats">
+        {% for cat in hit_cats %}
+        {% set info = cur_week_cats.get(cat, {}) %}
+        <div class="cur-cat-chip {{ 'chip-tie' if info.get('winner') == 'Tie' }}">
+          <span class="cur-cat-name">{{ cat }}</span>
+          <span class="cur-cat-winner">{{ info.get('winner', '—') }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="cur-cats-label">Pitching</div>
+      <div class="cur-week-cats">
+        {% for cat in pit_cats %}
+        {% set info = cur_week_cats.get(cat, {}) %}
+        <div class="cur-cat-chip {{ 'chip-tie' if info.get('winner') == 'Tie' }}">
+          <span class="cur-cat-name">{{ cat }}</span>
+          <span class="cur-cat-winner">{{ info.get('winner', '—') }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="cur-week-score">
+      {% for name in manager_names %}
+      <span class="cws-mgr">{{ name }}</span>
+      <span class="cws-wins">
+        {% set pts = namespace(total=0) %}
+        {% for cat, info in cur_week_cats.items() %}
+          {% set pts.total = pts.total + (info.pts.get(name, 0) if info.pts is defined else (1 if info.winner == name else 0)) %}
+        {% endfor %}
+        {{ pts.total }}
+        <span class="cws-label">cats</span>
+      </span>
+      {% if loop.first %}<span class="cws-vs">·</span>{% endif %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-note">No stats recorded yet for Week {{ week_num }}.</p>
+    {% endif %}
+  </section>
+
+  <!-- ── Today's stats ─────────────────────────────────────── -->
+  <section class="card today-card">
+    <div class="today-header">
+      <h2 class="card-title">Today's Stats</h2>
+      <div class="today-meta">
+        <span class="live-dot"></span>
+        <span id="today-updated">Loading…</span>
+      </div>
+    </div>
+    <div id="today-container" class="today-managers">
+      <div class="today-loading">Fetching live data…</div>
+    </div>
+  </section>
+
+  <!-- ── Season grid ───────────────────────────────────────── -->
+  <section class="card weekly-grid-card">
+    <h2 class="card-title">Season Results</h2>
+    <div class="table-scroll">
+      <table class="weekly-table">
+        <thead>
+          <tr>
+            <th>Manager</th>
+            {% for w in weeks %}<th><a href="/week/{{ w }}">Wk {{ w }}</a></th>{% endfor %}
+            <th class="total-col">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for name in manager_names %}
+          {% set other = manager_names[1 - loop.index0] %}
+          <tr>
+            <td class="mgr-cell">{{ name }}</td>
+            {% for w in weeks %}
+              {% set wins = by_week.get(w, {}).get(name) %}
+              {% set other_wins = by_week.get(w, {}).get(other, 0) %}
+              <td class="week-cell
+                {% if wins is not none %}
+                  {% if wins > other_wins %}cell-win
+                  {% elif wins < other_wins %}cell-loss
+                  {% else %}cell-tie{% endif %}
+                {% endif %}
+              ">{{ wins if wins is not none else '—' }}</td>
+            {% endfor %}
+            <td class="total-col total-wins">{{ totals.get(name, 0) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/today.js') }}"></script>
+<script>initTodayStats(60000);</script>
+{% endblock %}
