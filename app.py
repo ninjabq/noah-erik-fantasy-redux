@@ -168,12 +168,14 @@ def index():
     managers = db.execute('SELECT name FROM managers ORDER BY id').fetchall()
     manager_names = [m['name'] for m in managers]
 
-    # Weeks won: count weeks where a manager had strictly more category wins than the other
+    # Weeks won: count completed weeks only (skip the current in-progress week)
     weeks_won = {name: 0 for name in manager_names}
     for week, wdata in by_week.items():
+        if week == week_num:
+            continue   # week still in progress
         if len(wdata) == 2:
-            scores = list(wdata.items())  # [(name, wins), (name, wins)]
-            if scores[0][1] != scores[1][1]:  # not a tie week
+            scores = list(wdata.items())
+            if scores[0][1] != scores[1][1]:  # not a tied week
                 winner = max(scores, key=lambda x: x[1])[0]
                 weeks_won[winner] = weeks_won.get(winner, 0) + 1
 

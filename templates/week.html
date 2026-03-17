@@ -57,6 +57,24 @@
       {% endfor %}
     </div>
     {% endfor %}
+
+    {# Total category score across all 10 categories #}
+    {% if cats %}
+    <div class="cat-score-total">
+      {% for name in manager_names %}
+      {% set ns = namespace(pts=0) %}
+      {% for cat, info in cats.items() %}
+        {% set ns.pts = ns.pts + (info.get('pts', {}).get(name, 0) if info.get('pts') else (1 if info.get('winner') == name else (0.5 if info.get('winner') == 'Tie' else 0))) %}
+      {% endfor %}
+      <div class="cat-score-mgr {{ 'cat-score-leading' if ns.pts > 5 }}">
+        <span class="cat-score-name">{{ name }}</span>
+        <span class="cat-score-pts">{{ ns.pts }}</span>
+        <span class="cat-score-label">/ 10</span>
+      </div>
+      {% if loop.first %}<div class="cat-score-sep">—</div>{% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
   </section>
 
   {# Build lookup maps for each manager's rows by slot key #}

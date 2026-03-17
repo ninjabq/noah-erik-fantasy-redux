@@ -226,8 +226,26 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .cat-val { font-family: var(--font-mono); font-size: .75rem; color: var(--text-dim); }
 .cat-val-win { color: var(--text); font-weight: 600; }
 
-/* ── Week page ───────────────────────────────────────────────────── */
-.page-week {}
+/* ── Category score total (week page) ───────────────────────────── */
+.cat-score-total {
+  display: flex; align-items: center; justify-content: center;
+  gap: 2rem; margin-top: .75rem;
+  padding-top: .75rem; border-top: 1px solid var(--border);
+}
+.cat-score-mgr {
+  display: flex; align-items: baseline; gap: .4rem;
+  font-family: var(--font-mono);
+}
+.cat-score-name { font-size: .75rem; color: var(--text-dim); }
+.cat-score-pts {
+  font-family: var(--font-display); font-size: 2rem;
+  line-height: 1; color: var(--text-dim);
+}
+.cat-score-mgr.cat-score-leading .cat-score-pts { color: var(--text); }
+.cat-score-label { font-size: .65rem; color: var(--text-mute); }
+.cat-score-sep { color: var(--text-mute); font-size: .9rem; }
+
+/* ── Week page ───────────────────────────────────────────────────── */.page-week {}
 .week-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1.5rem 0 1rem;
@@ -389,7 +407,7 @@ tr:hover td { background: rgba(255,255,255,.025); }
 #today-updated { font-family: var(--font-mono); font-size: .72rem; color: var(--text-mute); }
 
 .today-managers { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-.today-manager-panel {}
+.today-manager-panel { min-width: 0; overflow: hidden; }
 .today-mgr-name {
   font-family: var(--font-display); font-size: 1.2rem; letter-spacing: .08em;
   color: var(--accent2); margin-bottom: .75rem;
