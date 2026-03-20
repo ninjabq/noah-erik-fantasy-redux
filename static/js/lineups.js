@@ -98,7 +98,7 @@ function renderDropdown(dropdown, players, input) {
 
   dropdown.innerHTML = players.map(p => {
     // 'used' and 'in_lineup' are blocked (not selectable)
-    const blocked = p.conflict === 'used' || p.conflict === 'in_lineup';
+    const blocked = p.conflict === 'used' || p.conflict === 'in_lineup' || p.conflict === 'other_perm';
     let cls = '';
     let note = '';
     let nameStyle = '';
@@ -110,6 +110,10 @@ function renderDropdown(dropdown, players, input) {
     } else if (p.conflict === 'in_lineup') {
       cls = 'ac-item-conflict-used ac-item-blocked';
       note = '<span class="ac-conflict-note">Already in lineup</span>';
+      nameStyle = 'text-decoration:line-through';
+    } else if (p.conflict === 'other_perm') {
+      cls = 'ac-item-conflict-used ac-item-blocked';
+      note = '<span class="ac-conflict-note">Other manager\'s permanent</span>';
       nameStyle = 'text-decoration:line-through';
     } else if (p.conflict === 'other_week') {
       cls = 'ac-item-conflict-other';

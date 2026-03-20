@@ -485,6 +485,17 @@ def validate_player():
         db.close()
         return jsonify({'valid': False, 'reason': f'Already in your lineup ({dupe["position"]})'})
 
+    # Check if the player is a permanent player for the other manager
+    other_perm = db.execute('''
+        SELECT m.name FROM permanent_players pp
+        JOIN players p ON pp.player_id = p.id
+        JOIN managers m ON pp.manager_id = m.id
+        WHERE pp.manager_id != ? AND p.name = ? AND pp.is_backup = 0 AND pp.has_been_swapped = 0
+    ''', (manager['id'], player_name)).fetchone()
+    if other_perm:
+        db.close()
+        return jsonify({'valid': False, 'reason': f"Permanent player for {other_perm['name']}"})
+
     # Check used by other manager this week (temp only)
     other = db.execute('''
         SELECT m.name FROM lineups l
@@ -727,6 +738,7 @@ def api_roster_search():
     used_by_this_manager     = set()
     used_this_week_by_other  = set()
     already_in_lineup        = set()
+    other_manager_perms      = set()
     if manager_name:
         mgr = db.execute('SELECT id FROM managers WHERE name=?', (manager_name,)).fetchone()
         if mgr:
@@ -749,6 +761,14 @@ def api_roster_search():
                 WHERE l.manager_id=? AND l.week=?
             ''', (mgr['id'], week)).fetchall()
             already_in_lineup = {r['name'] for r in rows}
+
+            # Permanent players of the OTHER manager (cannot be selected)
+            rows = db.execute('''
+                SELECT p.name FROM permanent_players pp
+                JOIN players p ON pp.player_id=p.id
+                WHERE pp.manager_id!=? AND pp.is_backup=0 AND pp.has_been_swapped=0
+            ''', (mgr['id'],)).fetchall()
+            other_manager_perms = {r['name'] for r in rows}
 
     # For pitchers, normalise position into SP or RP for display,
     # but don't filter — let any pitcher appear in any pitching slot.
@@ -782,6 +802,8 @@ def api_roster_search():
         }
         if r['name'] in already_in_lineup:
             entry['conflict'] = 'in_lineup'    # already in this lineup this week
+        elif r['name'] in other_manager_perms:
+            entry['conflict'] = 'other_perm'   # permanent player of the other manager
         elif r['name'] in used_by_this_manager:
             entry['conflict'] = 'used'          # used in a prior week
         elif r['name'] in used_this_week_by_other:
