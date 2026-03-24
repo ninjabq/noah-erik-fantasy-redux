@@ -6,7 +6,7 @@ labels (SP/RP/C/OF etc.) are correct immediately without waiting for a full sync
 Run:  python seed_db.py
 """
 
-import sqlite3, os
+import sqlite3, os, unicodedata
 from init_db import init
 
 DB_PATH = os.environ.get('DB_PATH', 'fantasy.db')
@@ -17,60 +17,66 @@ MANAGERS = ['Noah', 'Erik']
 
 PERMANENT_PLAYERS = {
     'Noah': {
-        'batters':  ['Bryce Harper', 'Kyle Schwarber', 'Trea Turner'],
-        'pitchers': ['Zack Wheeler', 'Cristopher Sanchez', 'Jhoan Duran'],
+        'batters':  ['Bobby Witt Jr.', 'Juan Soto', 'Julio Rodríguez'],
+        'pitchers': ['Paul Skenes', 'Garrett Crochet', 'Mason Miller'],
     },
     'Erik': {
-        'batters':  ['Vladimir Guerrero Jr.', 'Bobby Witt Jr.', 'Jarren Duran'],
-        'pitchers': ['Paul Skenes', 'Aaron Nola', 'Devin Williams'],
+        'batters':  ['Cal Raleigh', 'José Ramírez', 'Aaron Judge'],
+        'pitchers': ['Tarik Skubal', 'Hunter Brown', 'Jhoan Duran'],
     },
 }
 
 BACKUP_PLAYERS = {
     'Noah': {
-        'batters':  ['Julio Rodriguez', 'Kyle Tucker', 'Eugenio Suarez'],
-        'pitchers': ['Tarik Skubal', 'Cole Ragans', 'Emmanuel Clase'],
+        'batters':  ['Vladimir Guerrero Jr.', 'Gunnar Henderson', 'Fernando Tatis Jr.'],
+        'pitchers': ['Max Fried', 'Bryan Woo', 'Cade Smith'],
     },
     'Erik': {
-        'batters':  ['Aaron Judge', 'Alec Bohm', 'Gunnar Henderson'],
-        'pitchers': ['Ranger Suarez', 'Yoshinobu Yamamoto', 'Mason Miller'],
+        'batters':  ['Nick Kurtz', 'Junior Caminero', 'Roman Anthony'],
+        'pitchers': ['Cristopher Sánchez', 'Jacob Misiorowski', 'Andrés Muñoz'],
     },
 }
 
 # Explicit player data: (mlb_id, canonical_name, team, position, position_type)
 # position must be the normalised value: SP, RP, C, 1B, 2B, 3B, SS, OF, DH
 PLAYER_DATA = {
-    # Noah permanents
-    'Bryce Harper':           (522975,  'Bryce Harper',           'PHI', '1B',  'batter'),
-    'Kyle Schwarber':         (656941,  'Kyle Schwarber',         'PHI', 'DH',  'batter'),
-    'Trea Turner':            (607208,  'Trea Turner',            'PHI', 'SS',  'batter'),
-    'Zack Wheeler':           (554430,  'Zack Wheeler',           'PHI', 'SP',  'pitcher'),
-    'Cristopher Sanchez':     (656945,  'Cristopher Sanchez',     'PHI', 'SP',  'pitcher'),
-    'Jhoan Duran':            (661858,  'Jhoan Duran',            'PHI', 'RP',  'pitcher'),
-    # Noah backups
-    'Julio Rodriguez':        (677594,  'Julio Rodriguez',        'SEA', 'OF',  'batter'),
-    'Kyle Tucker':            (663855,  'Kyle Tucker',            'CHC', 'OF',  'batter'),
-    'Eugenio Suarez':         (553993,  'Eugenio Suarez',         'ARI', '3B',  'batter'),
-    'Tarik Skubal':           (669373,  'Tarik Skubal',           'DET', 'SP',  'pitcher'),
-    'Cole Ragans':            (669712,  'Cole Ragans',            'KC',  'SP',  'pitcher'),
-    'Emmanuel Clase':         (667555,  'Emmanuel Clase',         'CLE', 'RP',  'pitcher'),
-    # Erik permanents
-    'Vladimir Guerrero Jr.':  (665489,  'Vladimir Guerrero Jr.',  'TOR', '1B',  'batter'),
-    'Bobby Witt Jr.':         (677951,  'Bobby Witt Jr.',         'KC',  'SS',  'batter'),
-    'Jarren Duran':           (680776,  'Jarren Duran',           'BOS', 'OF',  'batter'),
-    'Paul Skenes':            (694973,  'Paul Skenes',            'PIT', 'SP',  'pitcher'),
-    'Aaron Nola':             (605400,  'Aaron Nola',             'PHI', 'SP',  'pitcher'),
-    'Devin Williams':         (669203,  'Devin Williams',         'NYY', 'RP',  'pitcher'),
-    # Erik backups
-    'Aaron Judge':            (592450,  'Aaron Judge',            'NYY', 'OF',  'batter'),
-    'Alec Bohm':              (664353,  'Alec Bohm',              'PHI', '3B',  'batter'),
-    'Gunnar Henderson':       (683002,  'Gunnar Henderson',       'BAL', 'SS',  'batter'),
-    'Ranger Suarez':          (661482,  'Ranger Suarez',          'PHI', 'SP',  'pitcher'),
-    'Yoshinobu Yamamoto':     (808982,  'Yoshinobu Yamamoto',     'LAD', 'SP',  'pitcher'),
-    'Mason Miller':           (694984,  'Mason Miller',           'OAK', 'RP',  'pitcher'),
+    # ── Noah permanents ───────────────────────────────────────────────
+    'Bobby Witt Jr.':       (677951, 'Bobby Witt Jr.',       'KC',  'SS', 'batter'),
+    'Juan Soto':            (665742, 'Juan Soto',            'NYM', 'OF', 'batter'),
+    'Julio Rodríguez':      (677594, 'Julio Rodríguez',      'SEA', 'OF', 'batter'),
+    'Paul Skenes':          (694973, 'Paul Skenes',          'PIT', 'SP', 'pitcher'),
+    'Garrett Crochet':      (676979, 'Garrett Crochet',      'BOS', 'SP', 'pitcher'),
+    'Mason Miller':         (695243, 'Mason Miller',         'SD',  'RP', 'pitcher'),
+
+    # ── Noah backups ──────────────────────────────────────────────────
+    'Vladimir Guerrero Jr.':(665489, 'Vladimir Guerrero Jr.','TOR', '1B', 'batter'),
+    'Gunnar Henderson':     (683002, 'Gunnar Henderson',     'BAL', 'SS', 'batter'),
+    'Fernando Tatis Jr.':   (665487, 'Fernando Tatis Jr.',   'SD',  'OF', 'batter'),
+    'Max Fried':            (608331, 'Max Fried',            'NYY', 'SP', 'pitcher'),
+    'Bryan Woo':            (693433, 'Bryan Woo',            'SEA', 'SP', 'pitcher'),
+    'Cade Smith':           (671922, 'Cade Smith',           'CLE', 'RP', 'pitcher'),
+
+    # ── Erik permanents ───────────────────────────────────────────────
+    'Cal Raleigh':          (663728, 'Cal Raleigh',          'SEA', 'C',  'batter'),
+    'José Ramírez':         (608070, 'José Ramírez',         'CLE', '3B', 'batter'),
+    'Aaron Judge':          (592450, 'Aaron Judge',          'NYY', 'OF', 'batter'),
+    'Tarik Skubal':         (669373, 'Tarik Skubal',         'DET', 'SP', 'pitcher'),
+    'Hunter Brown':         (686613, 'Hunter Brown',         'HOU', 'SP', 'pitcher'),
+    'Jhoan Duran':          (661395, 'Jhoan Duran',          'PHI', 'RP', 'pitcher'),
+
+    # ── Erik backups ──────────────────────────────────────────────────
+    'Nick Kurtz':           (701762, 'Nick Kurtz',           'ATH', '1B', 'batter'),
+    'Junior Caminero':      (691406, 'Junior Caminero',      'TB',  '3B', 'batter'),
+    'Roman Anthony':        (701350, 'Roman Anthony',        'BOS', 'OF', 'batter'),
+    'Cristopher Sánchez':   (650911, 'Cristopher Sánchez',  'PHI', 'SP', 'pitcher'),
+    'Jacob Misiorowski':    (694819, 'Jacob Misiorowski',   'MIL', 'SP', 'pitcher'),
+    'Andrés Muñoz':         (662253, 'Andrés Muñoz',        'SEA', 'RP', 'pitcher'),
 }
 
 # ── Seed logic ─────────────────────────────────────────────────────────────────
+
+def strip_accents(text):
+    return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
 
 def seed():
     init()  # create tables if not exist
@@ -85,56 +91,59 @@ def seed():
 
     # Upsert all player data into both `players` and `mlb_roster`
     for key, (mlb_id, canonical_name, team, position, pos_type) in PLAYER_DATA.items():
-        import unicodedata
-        name_ascii = unicodedata.normalize('NFKD', canonical_name).encode('ASCII','ignore').decode('ASCII')
+        name_ascii = strip_accents(canonical_name)
 
-        # players table (used for lineup tracking)
+        # players table
         conn.execute('''
             INSERT INTO players (mlb_id, name, team, position_type)
             VALUES (?,?,?,?)
             ON CONFLICT(mlb_id) DO UPDATE SET
-                name=excluded.name, team=excluded.team, position_type=excluded.position_type
+                name=excluded.name, team=excluded.team,
+                position_type=excluded.position_type
         ''', (mlb_id, canonical_name, team, pos_type))
 
-        # mlb_roster table (used for autocomplete + position labels)
-        # position_pinned=1 prevents the nightly sync from overwriting these known-correct values
+        # mlb_roster table — position_pinned=1 so nightly sync won't overwrite
         conn.execute('''
-            INSERT INTO mlb_roster (mlb_id, name, name_ascii, team, team_full, position, position_type, position_pinned, last_updated)
+            INSERT INTO mlb_roster
+                (mlb_id, name, name_ascii, team, team_full, position,
+                 position_type, position_pinned, last_updated)
             VALUES (?,?,?,?,?,?,?,1,?)
             ON CONFLICT(mlb_id) DO UPDATE SET
                 name=excluded.name, name_ascii=excluded.name_ascii,
                 team=excluded.team, position=excluded.position,
                 position_type=excluded.position_type,
-                position_pinned=1,
-                last_updated=excluded.last_updated
-        ''', (mlb_id, canonical_name, name_ascii, team, team, position, pos_type, today))
+                position_pinned=1, last_updated=excluded.last_updated
+        ''', (mlb_id, canonical_name, name_ascii, team, team, position,
+              pos_type, today))
 
     conn.commit()
 
     # Insert permanent / backup player associations
     for manager_name in MANAGERS:
-        mgr = conn.execute('SELECT id FROM managers WHERE name=?', (manager_name,)).fetchone()
+        mgr = conn.execute('SELECT id FROM managers WHERE name=?',
+                           (manager_name,)).fetchone()
         mid = mgr['id']
 
         for is_backup, source in [(0, PERMANENT_PLAYERS), (1, BACKUP_PLAYERS)]:
             data = source.get(manager_name, {})
-            for pos_type_key, names in [('batters', 'batter'), ('pitchers', 'pitcher')]:
-                for pname in data.get(pos_type_key, []):
-                    # Find the canonical name key (handles accent variants)
-                    lookup_name = pname
+            for pos_key, names in [('batters', 'batter'), ('pitchers', 'pitcher')]:
+                for pname in data.get(pos_key, []):
+                    # Find by name or accent-stripped name in PLAYER_DATA
+                    lookup = pname
                     if pname not in PLAYER_DATA:
-                        # Try accent-stripped version
-                        import unicodedata as _u
-                        stripped = _u.normalize('NFKD', pname).encode('ASCII','ignore').decode('ASCII')
-                        if stripped in PLAYER_DATA:
-                            lookup_name = stripped
-
-                    if lookup_name not in PLAYER_DATA:
+                        stripped = strip_accents(pname)
+                        lookup = next(
+                            (k for k in PLAYER_DATA if strip_accents(k) == stripped),
+                            None
+                        )
+                    if not lookup or lookup not in PLAYER_DATA:
                         print(f"  WARNING: {pname} not in PLAYER_DATA — skipping")
                         continue
 
-                    mlb_id = PLAYER_DATA[lookup_name][0]
-                    player = conn.execute('SELECT id FROM players WHERE mlb_id=?', (mlb_id,)).fetchone()
+                    mlb_id = PLAYER_DATA[lookup][0]
+                    player = conn.execute(
+                        'SELECT id FROM players WHERE mlb_id=?', (mlb_id,)
+                    ).fetchone()
                     if not player:
                         print(f"  WARNING: {pname} (id={mlb_id}) not in players table")
                         continue
