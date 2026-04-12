@@ -4,6 +4,10 @@
 {% block content %}
 <div class="page-roster">
   <h1 class="page-title">ROSTERS</h1>
+
+  {# ══════════════════════════════════════════════════════════════
+     SECTION 1 — Roster cards (permanent / backup lists)
+     ══════════════════════════════════════════════════════════════ #}
   <div class="roster-grid">
     {% for manager, players in roster_data.items() %}
     <div class="roster-panel card">
@@ -32,7 +36,8 @@
                 data-permanent="{{ p.name }}"
                 data-pos-type="{{ p.position_type }}">
                 Swap ↕
-              </button>            {% endif %}
+              </button>
+            {% endif %}
           </div>
           {% endfor %}
         </div>
@@ -66,8 +71,197 @@
 
     </div>
     {% endfor %}
-  </div>
-</div>
+  </div>{# end roster-grid #}
+
+  {# ══════════════════════════════════════════════════════════════
+     SECTION 2 — Season stats for all permanent/backup players
+     ══════════════════════════════════════════════════════════════ #}
+  <h2 class="section-heading">Season Stats</h2>
+
+  {% for manager in manager_names %}
+  {% set mseason = roster_season.get(manager, {}) %}
+  {% set batters  = mseason.get('batters',  []) %}
+  {% set pitchers = mseason.get('pitchers', []) %}
+
+  <section class="card roster-stats-card">
+    <h3 class="card-title manager-title">{{ manager }}</h3>
+
+    {# ── Batters ─────────────────────────────────────────────── #}
+    {% if batters %}
+    <div class="table-label">Hitters</div>
+    <div class="table-scroll">
+      <table class="stat-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th>POS</th>
+            <th>Team</th>
+            <th class="rs-badge-col"></th>
+            <th>H</th>
+            <th>1B</th>
+            <th>2B</th>
+            <th>3B</th>
+            <th>HR</th>
+            <th>AB</th>
+            <th>SLG</th>
+            <th>RBI</th>
+            <th>BB</th>
+            <th>SB</th>
+            <th>K</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in batters %}
+          <tr class="{{ 'rs-swapped-out' if p.has_been_swapped and not p.is_backup else ('rs-backup' if p.is_backup) }}">
+            <td class="name-cell">{{ p.name }}</td>
+            <td class="pos-cell">{{ p.position }}</td>
+            <td class="team-cell">{{ p.team or '—' }}</td>
+            <td class="rs-badge-col">
+              {% if p.has_been_swapped and not p.is_backup %}
+                <span class="rs-tag rs-tag-out">Out</span>
+              {% elif p.has_been_swapped and p.is_backup %}
+                <span class="rs-tag rs-tag-active">Active</span>
+              {% elif p.is_backup %}
+                <span class="rs-tag rs-tag-backup">Backup</span>
+              {% else %}
+                <span class="rs-tag rs-tag-perm">Perm</span>
+              {% endif %}
+            </td>
+            <td>{{ p.hits or 0 }}</td>
+            <td>{{ p.singles or 0 }}</td>
+            <td>{{ p.doubles or 0 }}</td>
+            <td>{{ p.triples or 0 }}</td>
+            <td>{{ p.homeruns or 0 }}</td>
+            <td>{{ p.ab or 0 }}</td>
+            <td>{{ '%.3f'|format(p.slg or 0) }}</td>
+            <td>{{ p.rbi or 0 }}</td>
+            <td>{{ p.bb or 0 }}</td>
+            <td>{{ p.sb or 0 }}</td>
+            <td>{{ p.k or 0 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {# Totals row — permanent players only (active, not swapped out) #}
+        {% set active_batters = batters | selectattr('has_been_swapped','equalto',0) | selectattr('is_backup','equalto',0) | list %}
+        {% if active_batters %}
+        {% set tot_ab = active_batters|sum(attribute='ab') %}
+        {% set tot_tb = active_batters|sum(attribute='total_bases') %}
+        <tfoot>
+          <tr class="totals-row">
+            <td colspan="4">Active Permanents Total</td>
+            <td>{{ active_batters|sum(attribute='hits') }}</td>
+            <td>{{ active_batters|sum(attribute='singles') }}</td>
+            <td>{{ active_batters|sum(attribute='doubles') }}</td>
+            <td>{{ active_batters|sum(attribute='triples') }}</td>
+            <td>{{ active_batters|sum(attribute='homeruns') }}</td>
+            <td>{{ tot_ab }}</td>
+            <td>{{ '%.3f'|format(tot_tb / tot_ab) if tot_ab else '—' }}</td>
+            <td>{{ active_batters|sum(attribute='rbi') }}</td>
+            <td>{{ active_batters|sum(attribute='bb') }}</td>
+            <td>{{ active_batters|sum(attribute='sb') }}</td>
+            <td>{{ active_batters|sum(attribute='k') }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
+      </table>
+    </div>
+    {% endif %}
+
+    {# ── Pitchers ─────────────────────────────────────────────── #}
+    {% if pitchers %}
+    <div class="table-label" style="margin-top:1.5rem">Pitchers</div>
+    <div class="table-scroll">
+      <table class="stat-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th>POS</th>
+            <th>Team</th>
+            <th class="rs-badge-col"></th>
+            <th>IP</th>
+            <th>ER</th>
+            <th>H</th>
+            <th>BB</th>
+            <th>ERA</th>
+            <th>WHIP</th>
+            <th>SO</th>
+            <th>QS</th>
+            <th>SV</th>
+            <th>HD</th>
+            <th>BS</th>
+            <th>SV+HD-BS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in pitchers %}
+          <tr class="{{ 'rs-swapped-out' if p.has_been_swapped and not p.is_backup else ('rs-backup' if p.is_backup) }}">
+            <td class="name-cell">{{ p.name }}</td>
+            <td class="pos-cell">{{ p.position }}</td>
+            <td class="team-cell">{{ p.team or '—' }}</td>
+            <td class="rs-badge-col">
+              {% if p.has_been_swapped and not p.is_backup %}
+                <span class="rs-tag rs-tag-out">Out</span>
+              {% elif p.has_been_swapped and p.is_backup %}
+                <span class="rs-tag rs-tag-active">Active</span>
+              {% elif p.is_backup %}
+                <span class="rs-tag rs-tag-backup">Backup</span>
+              {% else %}
+                <span class="rs-tag rs-tag-perm">Perm</span>
+              {% endif %}
+            </td>
+            <td>{{ '%.1f'|format(p.ip or 0) }}</td>
+            <td>{{ p.er or 0 }}</td>
+            <td>{{ p.h or 0 }}</td>
+            <td>{{ p.p_bb or 0 }}</td>
+            <td>{{ '%.2f'|format(p.era or 0) }}</td>
+            <td>{{ '%.2f'|format(p.whip or 0) }}</td>
+            <td>{{ p.so or 0 }}</td>
+            <td>{{ p.qs or 0 }}</td>
+            <td>{{ p.sv or 0 }}</td>
+            <td>{{ p.hd or 0 }}</td>
+            <td>{{ p.bs or 0 }}</td>
+            <td>{{ p.sv_hd_bs or 0 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {# Totals row — active permanent pitchers only #}
+        {% set active_pitchers = pitchers | selectattr('has_been_swapped','equalto',0) | selectattr('is_backup','equalto',0) | list %}
+        {% if active_pitchers %}
+        {% set true_ip_total = namespace(val=0.0) %}
+        {% for p in active_pitchers %}
+          {% set true_ip_total.val = true_ip_total.val + ((p.ip or 0) | ip_to_true) %}
+        {% endfor %}
+        {% set tot_er  = active_pitchers|sum(attribute='er') %}
+        {% set tot_hbb = namespace(val=0) %}
+        {% for p in active_pitchers %}
+          {% set tot_hbb.val = tot_hbb.val + (p.h or 0) + (p.p_bb or 0) %}
+        {% endfor %}
+        <tfoot>
+          <tr class="totals-row">
+            <td colspan="4">Active Permanents Total</td>
+            <td>{{ '%.1f'|format(active_pitchers|sum(attribute='ip')) }}</td>
+            <td>{{ tot_er }}</td>
+            <td>{{ active_pitchers|sum(attribute='h') }}</td>
+            <td>{{ active_pitchers|sum(attribute='p_bb') }}</td>
+            <td>{{ '%.2f'|format(tot_er / true_ip_total.val * 9) if true_ip_total.val else '—' }}</td>
+            <td>{{ '%.2f'|format(tot_hbb.val / true_ip_total.val) if true_ip_total.val else '—' }}</td>
+            <td>{{ active_pitchers|sum(attribute='so') }}</td>
+            <td>{{ active_pitchers|sum(attribute='qs') }}</td>
+            <td>{{ active_pitchers|sum(attribute='sv') }}</td>
+            <td>{{ active_pitchers|sum(attribute='hd') }}</td>
+            <td>{{ active_pitchers|sum(attribute='bs') }}</td>
+            <td>{{ active_pitchers|sum(attribute='sv_hd_bs') }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
+      </table>
+    </div>
+    {% endif %}
+
+  </section>
+  {% endfor %}
+
+</div>{# end page-roster #}
 
 {# ── Swap modal ──────────────────────────────────────────────────── #}
 <div id="swap-modal" class="modal-overlay" style="display:none">
@@ -101,37 +295,31 @@
 
 {% block scripts %}
 <script>
-// Roster swap modal logic
 const modal      = document.getElementById('swap-modal');
 const permLabel  = document.getElementById('swap-perm-name');
 const backupSel  = document.getElementById('swap-backup-select');
 const confirmBtn = document.getElementById('swap-confirm-btn');
 const cancelBtn  = document.getElementById('swap-cancel-btn');
-let   _swapMgr   = '', _swapPerm = '', _swapType = 'permanent';
+let _swapMgr = '', _swapPerm = '', _swapType = 'permanent';
 
 document.querySelectorAll('.swap-trigger-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     _swapMgr  = btn.dataset.manager;
     _swapPerm = btn.dataset.permanent;
-    const posType = btn.dataset.posType;   // 'batter' or 'pitcher'
+    const posType = btn.dataset.posType;
 
     permLabel.textContent = _swapPerm;
     _swapType = 'permanent';
-    document.querySelectorAll('.swap-type-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.type === 'permanent');
-    });
+    document.querySelectorAll('.swap-type-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.type === 'permanent'));
 
-    // Populate backup options — only show backups of the SAME position type
-    // and that haven't already been permanently activated
     backupSel.innerHTML = '';
     document.querySelectorAll(`.roster-player.backup[data-manager="${_swapMgr}"]`).forEach(row => {
-      if (row.querySelector('.swap-badge.active')) return;  // already swapped in
-      // Check position type via the rp-pos span text — SP/RP = pitcher, others = batter
+      if (row.querySelector('.swap-badge.active')) return;
       const posSpan = row.querySelector('.rp-pos');
       const rowPos  = posSpan ? posSpan.textContent.trim() : '';
       const rowType = (rowPos === 'SP' || rowPos === 'RP') ? 'pitcher' : 'batter';
       if (rowType !== posType) return;
-
       const name = row.dataset.player;
       const opt  = document.createElement('option');
       opt.value  = name;
@@ -139,7 +327,7 @@ document.querySelectorAll('.swap-trigger-btn').forEach(btn => {
       backupSel.appendChild(opt);
     });
 
-    if (backupSel.options.length === 0) {
+    if (!backupSel.options.length) {
       const opt = document.createElement('option');
       opt.textContent = 'No eligible backups';
       opt.disabled = true;
@@ -148,7 +336,6 @@ document.querySelectorAll('.swap-trigger-btn').forEach(btn => {
     } else {
       confirmBtn.disabled = false;
     }
-
     modal.style.display = 'flex';
   });
 });
@@ -167,34 +354,22 @@ modal.addEventListener('click', e => { if (e.target === modal) { modal.style.dis
 confirmBtn.addEventListener('click', async () => {
   const backupName = backupSel.value;
   if (!backupName) return;
-
   confirmBtn.textContent = 'Saving…';
   confirmBtn.disabled = true;
-
   try {
-    const res = await fetch('/api/swap_permanent', {
+    const res  = await fetch('/api/swap_permanent', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        manager: _swapMgr,
-        permanent_player: _swapPerm,
-        backup_player: backupName,
-        swap_type: _swapType,
+        manager: _swapMgr, permanent_player: _swapPerm,
+        backup_player: backupName, swap_type: _swapType,
       }),
     });
     const data = await res.json();
-    if (data.success) {
-      modal.style.display = 'none';
-      location.reload();
-    } else {
-      alert('Swap failed: ' + (data.reason || 'unknown error'));
-    }
-  } catch(e) {
-    alert('Network error');
-  } finally {
-    confirmBtn.textContent = 'Confirm Swap';
-    confirmBtn.disabled = false;
-  }
+    if (data.success) { modal.style.display = 'none'; location.reload(); }
+    else alert('Swap failed: ' + (data.reason || 'unknown error'));
+  } catch(e) { alert('Network error'); }
+  finally { confirmBtn.textContent = 'Confirm Swap'; confirmBtn.disabled = false; }
 });
 </script>
 {% endblock %}
