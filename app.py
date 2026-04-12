@@ -2,7 +2,7 @@ from flask import Flask, render_template, jsonify, request, abort
 from apscheduler.schedulers.background import BackgroundScheduler
 import sqlite3, os, json, unicodedata
 from datetime import datetime, date, timedelta
-from jobs.stat_fetcher import run_stat_update, run_today_update, strip_accents
+from jobs.stat_fetcher import run_stat_update, run_today_update, run_yesterday_update, strip_accents
 from jobs.roster_sync import sync_mlb_roster
 from week_schedule import current_week, week_dates, all_week_options, total_weeks, WEEKS
 
@@ -43,40 +43,41 @@ def sort_by_slot(rows, key='lineup_position'):
     return sorted(rows, key=lambda r: _SLOT_RANK.get(
         r[key] if isinstance(r, dict) else getattr(r, key, ''), 999))
 
+# ── Jinja filter: convert display IP to true decimal ──────────────────────────
+def _ip_display_to_true(ip_display):
+    """Convert display IP (6.2 = 6⅔ innings) to true decimal (6.667)."""
+    try:
+        val   = float(ip_display)
+        whole = int(val)
+        thirds = round((val - whole) * 10)
+        return whole + thirds / 3.0
+    except (TypeError, ValueError):
+        return 0.0
+
+app.jinja_env.filters['ip_to_true'] = _ip_display_to_true
+
 # ── Canonical permanent-player slot assignment ─────────────────────────────────
-# Maps a player's primary roster position to a lineup slot key.
-# Pitchers: SPs go SP-0..SP-1, RPs go RP-0
-# Batters: mapped by their defensive position
 _POSITION_TO_SLOT = {
     'C':   'C-0',
     '1B':  '1B-0',
     '2B':  '2B-0',
     '3B':  '3B-0',
     'SS':  'SS-0',
-    'OF':  'OF-0',   # first OF slot; additional OFs get OF-1, OF-2 sequentially
+    'OF':  'OF-0',
     'LF':  'OF-0',
     'CF':  'OF-0',
     'RF':  'OF-0',
     'DH':  'DH-0',
-    'IF':  '1B-0',   # utility infielder — default to 1B
-    'UT':  'DH-0',   # utility — default to DH
-    'SP':  'SP-0',   # first SP slot; additional SPs get SP-1
+    'IF':  '1B-0',
+    'UT':  'DH-0',
+    'SP':  'SP-0',
     'RP':  'RP-0',
     'CP':  'RP-0',
-    'P':   'SP-0',   # generic pitcher — assume SP
+    'P':   'SP-0',
 }
 
 def _auto_populate_permanents(db, managers, week_num):
-    """
-    For each manager, insert their active permanent players into lineup slots
-    for the given week if those slots aren't already filled.
-    Uses canonical position → slot mapping and avoids double-booking a slot.
-    """
     for m in managers:
-        # Get active permanent players (not swapped out).
-        # Position comes from mlb_roster (already normalised to SP/RP/C/OF/etc.)
-        # Fallback: pitchers default to 'RP' (safer — can always move to SP slot),
-        # batters default to 'OF'.
         perm_rows = db.execute('''
             SELECT
                 p.id as player_id, p.name, p.position_type,
@@ -91,7 +92,6 @@ def _auto_populate_permanents(db, managers, week_num):
             GROUP BY p.id
         ''', (m['id'],)).fetchall()
 
-        # Get already-filled slots for this manager/week
         filled = db.execute(
             'SELECT position FROM lineups WHERE manager_id = ? AND week = ?',
             (m['id'], week_num)
@@ -105,17 +105,15 @@ def _auto_populate_permanents(db, managers, week_num):
             pos      = (row['position'] or '').upper()
             pos_type = row['position_type']
 
-            # Determine target slot
             if pos_type == 'pitcher':
                 if pos == 'RP':
                     slot = 'RP-0'
-                    # If RP-0 taken, try RP-1, RP-2
                     for rp_i in range(3):
                         candidate = f'RP-{rp_i}'
                         if candidate not in used_slots:
                             slot = candidate
                             break
-                else:  # SP or unknown pitcher
+                else:
                     slot = f'SP-{sp_idx}'
                     sp_idx += 1
             else:
@@ -128,7 +126,6 @@ def _auto_populate_permanents(db, managers, week_num):
             if slot in used_slots:
                 continue
 
-            # Don't re-insert if already present in any slot
             existing = db.execute('''
                 SELECT id FROM lineups
                 WHERE manager_id = ? AND week = ? AND player_id = ?
@@ -153,13 +150,11 @@ def index():
     weeks = get_season_weeks()
     week_num = current_week()
 
-    # Total category wins
     totals = db.execute('''
         SELECT manager, SUM(wins) as total FROM category_wins GROUP BY manager
     ''').fetchall()
     totals = {r['manager']: r['total'] for r in totals}
 
-    # Per-week category wins
     week_wins = db.execute('SELECT week, manager, wins FROM category_wins ORDER BY week').fetchall()
     by_week = {}
     for r in week_wins:
@@ -168,18 +163,16 @@ def index():
     managers = db.execute('SELECT name FROM managers ORDER BY id').fetchall()
     manager_names = [m['name'] for m in managers]
 
-    # Weeks won: count completed weeks only (skip the current in-progress week)
     weeks_won = {name: 0 for name in manager_names}
     for week, wdata in by_week.items():
         if week == week_num:
-            continue   # week still in progress
+            continue
         if len(wdata) == 2:
             scores = list(wdata.items())
-            if scores[0][1] != scores[1][1]:  # not a tied week
+            if scores[0][1] != scores[1][1]:
                 winner = max(scores, key=lambda x: x[1])[0]
                 weeks_won[winner] = weeks_won.get(winner, 0) + 1
 
-    # Current week category results (summary for home page)
     cur_week_data = {}
     for m in db.execute('SELECT * FROM managers ORDER BY id').fetchall():
         batters = db.execute('''
@@ -211,22 +204,15 @@ def week_view(n):
     db = get_db()
     managers = db.execute('SELECT * FROM managers ORDER BY id').fetchall()
 
-    # Ensure permanent players are seeded into the lineup for this week
     _auto_populate_permanents(db, managers, n)
     data = {}
     for m in managers:
-        # Get all players in the lineup for this week
         lineup_rows = db.execute('''
             SELECT l.position, p.id as player_id, p.name, p.team, p.position_type
             FROM lineups l JOIN players p ON l.player_id = p.id
             WHERE l.manager_id = ? AND l.week = ?
         ''', (m['id'], n)).fetchall()
 
-        print(f"[week_view] week={n}, manager={m['name']}, lineup_rows={len(lineup_rows)}")
-        for lr in lineup_rows:
-            print(f"  {lr['position']} {lr['name']}")
-
-        # Get stats that have been fetched so far (keyed by player_id)
         stats_rows = db.execute('''
             SELECT ws.player_id, p.name, p.team, ws.*
             FROM weekly_stats ws JOIN players p ON ws.player_id = p.id
@@ -239,12 +225,10 @@ def week_view(n):
         for lr in lineup_rows:
             pid = lr['player_id']
             if pid in stats_by_pid:
-                # Use real stats, but ensure lineup_position from lineups table
                 row = dict(stats_by_pid[pid])
                 row['lineup_position'] = lr['position']
                 row['team'] = row['team'] or lr['team']
             else:
-                # Player in lineup but no stats yet — show zeros
                 if lr['position_type'] == 'batter':
                     row = _empty_batter_row({'position': lr['position'],
                                              'name': lr['name'], 'team': lr['team']})
@@ -274,7 +258,6 @@ def week_view(n):
     )
 
 def _empty_batter_row(r):
-    """Return a dict mimicking a weekly_stats row with zero batting stats."""
     return {
         'name': r['name'], 'team': r['team'],
         'lineup_position': r['position'],
@@ -284,7 +267,6 @@ def _empty_batter_row(r):
     }
 
 def _empty_pitcher_row(r):
-    """Return a dict mimicking a weekly_stats row with zero pitching stats."""
     return {
         'name': r['name'], 'team': r['team'],
         'lineup_position': r['position'],
@@ -302,10 +284,8 @@ def lineups_week_view(week_num):
     db = get_db()
     managers = db.execute('SELECT * FROM managers ORDER BY id').fetchall()
 
-    # Auto-populate permanent players into lineup slots for this week
     _auto_populate_permanents(db, managers, week_num)
 
-    # Used TEMPORARY players per manager in all weeks OTHER than this one
     used = {}
     for m in managers:
         rows = db.execute('''
@@ -321,7 +301,6 @@ def lineups_week_view(week_num):
         ''', (m['id'], week_num)).fetchall()
         used[m['name']] = [dict(r) for r in rows]
 
-    # All non-permanent players used this week (for conflict detection)
     used_this_week = {}
     for m in managers:
         rows = db.execute('''
@@ -331,7 +310,6 @@ def lineups_week_view(week_num):
         ''', (week_num,)).fetchall()
         used_this_week[m['name']] = [r['name'] for r in rows]
 
-    # Current week lineups keyed by slot position
     lineups = {}
     for m in managers:
         rows = db.execute('''
@@ -342,7 +320,6 @@ def lineups_week_view(week_num):
         ''', (m['id'], week_num)).fetchall()
         lineups[m['name']] = {r['position']: dict(r) for r in rows}
 
-    # Permanent players — one row per player per manager, no duplicates
     perms = {}
     for m in managers:
         rows = db.execute('''
@@ -453,13 +430,106 @@ def api_today():
     db.close()
     return jsonify(result)
 
+@app.route('/api/yesterday')
+def api_yesterday():
+    """Fetch yesterday's stats on demand and return them (does NOT persist to today_stats)."""
+    import threading
+    from datetime import timedelta
+    from jobs.stat_fetcher import get_game_ids_for_date, get_live_boxscore, BatterStats, PitcherStats
+
+    db = get_db()
+    week_num = current_week()
+    yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
+    managers = db.execute('SELECT * FROM managers ORDER BY id').fetchall()
+
+    game_ids = get_game_ids_for_date(yesterday_str)
+
+    game_info = {}
+    all_players = {}
+    for gid in game_ids:
+        bs, status, score, inning, away, home = get_live_boxscore(gid)
+        game_info[gid] = (status, score, inning, away, home)
+        combined = {**bs.get('home', {}).get('players', {}),
+                    **bs.get('away', {}).get('players', {})}
+        for pid_key, pdata in combined.items():
+            all_players[pid_key] = (pdata, gid)
+
+    team_to_game = {}
+    for gid in game_ids:
+        _, _, _, away, home = game_info[gid]
+        team_to_game[away.upper()] = gid
+        team_to_game[home.upper()] = gid
+
+    result = {}
+    slot_rank = _SLOT_RANK
+
+    for m in managers:
+        lineup = db.execute('''
+            SELECT l.player_id, p.name, p.mlb_id, p.position_type, p.team,
+                   l.position as lineup_position
+            FROM lineups l JOIN players p ON l.player_id=p.id
+            WHERE l.manager_id=? AND l.week=?
+        ''', (m['id'], week_num)).fetchall()
+
+        rows = []
+        for slot in lineup:
+            key  = f"ID{slot['mlb_id']}"
+            team = (slot['team'] or '').upper()
+            base = {
+                'name': slot['name'],
+                'team': slot['team'],
+                'position_type': slot['position_type'],
+                'lineup_position': slot['lineup_position'],
+            }
+
+            if key in all_players:
+                pdata, gid = all_players[key]
+                status, score, inning, away, home = game_info[gid]
+                opponent = home if team == away.upper() else away
+            elif team in team_to_game:
+                gid = team_to_game[team]
+                status, score, inning, away, home = game_info[gid]
+                opponent = home if team == away.upper() else away
+                pdata = None
+            else:
+                base.update({'game_status': 'off', 'opponent': '—', 'game_score': '—', 'inning': 'Off'})
+                rows.append(base)
+                continue
+
+            base.update({'game_status': status, 'opponent': opponent,
+                         'game_score': score, 'inning': inning})
+
+            if slot['position_type'] == 'batter':
+                s = BatterStats()
+                if pdata:
+                    s.update(pdata.get('stats', {}))
+                base.update({
+                    'singles': s.singles, 'doubles': s.doubles,
+                    'triples': s.triples, 'homeruns': s.homeruns,
+                    'ab': s.ab, 'rbi': s.rbi, 'bb': s.bb, 'sb': s.sb, 'k': s.k,
+                })
+            else:
+                s = PitcherStats()
+                if pdata:
+                    s.update(pdata.get('stats', {}))
+                base.update({
+                    'ip': s.ip_display, 'er': s.er, 'h': s.h, 'p_bb': s.bb,
+                    'sv': s.sv, 'hd': s.hd, 'bs': s.bs, 'so': s.so, 'qs': s.qs,
+                })
+            rows.append(base)
+
+        result[m['name']] = sorted(rows, key=lambda r: slot_rank.get(r.get('lineup_position') or '', 999))
+
+    db.close()
+    return jsonify({'date': yesterday_str, 'data': result})
+
 @app.route('/api/validate_player', methods=['POST'])
 def validate_player():
     data = request.json
     player_name  = data.get('player_name', '').strip()
     manager_name = data.get('manager', '').strip()
     week         = data.get('week', current_week())
-    position     = data.get('position', '')   # current slot being filled
+    position     = data.get('position', '')
 
     db = get_db()
     manager = db.execute('SELECT id FROM managers WHERE name = ?', (manager_name,)).fetchone()
@@ -467,7 +537,6 @@ def validate_player():
         db.close()
         return jsonify({'valid': False, 'reason': 'Unknown manager'})
 
-    # Check already used by this manager in a previous week (temp only)
     used = db.execute('''
         SELECT l.week FROM lineups l JOIN players p ON l.player_id = p.id
         WHERE l.manager_id = ? AND p.name = ? AND l.is_permanent = 0 AND l.week != ?
@@ -476,7 +545,6 @@ def validate_player():
         db.close()
         return jsonify({'valid': False, 'reason': f'Already used in Week {used["week"]}'})
 
-    # Check already in THIS manager's lineup THIS week in a DIFFERENT slot
     dupe = db.execute('''
         SELECT l.position FROM lineups l JOIN players p ON l.player_id = p.id
         WHERE l.manager_id = ? AND p.name = ? AND l.week = ? AND l.position != ?
@@ -485,7 +553,6 @@ def validate_player():
         db.close()
         return jsonify({'valid': False, 'reason': f'Already in your lineup ({dupe["position"]})'})
 
-    # Check if the player is a permanent player for the other manager
     other_perm = db.execute('''
         SELECT m.name FROM permanent_players pp
         JOIN players p ON pp.player_id = p.id
@@ -496,7 +563,6 @@ def validate_player():
         db.close()
         return jsonify({'valid': False, 'reason': f"Permanent player for {other_perm['name']}"})
 
-    # Check used by other manager this week (temp only)
     other = db.execute('''
         SELECT m.name FROM lineups l
         JOIN players p ON l.player_id = p.id
@@ -550,13 +616,11 @@ def set_lineup():
 
     player = None
 
-    # Prefer mlb_id lookup — unambiguous even for accent variants
     if mlb_id:
         try:
             mid = int(mlb_id)
             player = db.execute('SELECT id FROM players WHERE mlb_id = ?', (mid,)).fetchone()
             if not player:
-                # Auto-create from mlb_roster using mlb_id
                 roster_row = db.execute(
                     'SELECT * FROM mlb_roster WHERE mlb_id = ?', (mid,)
                 ).fetchone()
@@ -571,11 +635,9 @@ def set_lineup():
         except (ValueError, TypeError):
             pass
 
-    # Fallback: exact name match in players table
     if not player:
         player = db.execute('SELECT id FROM players WHERE name = ?', (player_name,)).fetchone()
 
-    # Fallback: exact name match in mlb_roster → auto-create player
     if not player:
         roster_row = db.execute(
             'SELECT * FROM mlb_roster WHERE name = ?', (player_name,)
@@ -628,18 +690,15 @@ def swap_permanent():
         return jsonify({'success': False, 'reason': 'Player not found'})
 
     if swap_type == 'permanent':
-        # Mark old permanent as swapped out
         db.execute('''
             UPDATE permanent_players SET has_been_swapped=1
             WHERE manager_id=? AND is_backup=0 AND player_id=?
         ''', (manager['id'], perm_player['id']))
-        # Activate backup as permanent
         db.execute('''
             UPDATE permanent_players SET has_been_swapped=1
             WHERE manager_id=? AND is_backup=1 AND player_id=?
         ''', (manager['id'], backup_player['id']))
 
-        # Look up the backup player's actual position from mlb_roster
         backup_info = db.execute('''
             SELECT p.position_type,
                    COALESCE(
@@ -653,10 +712,6 @@ def swap_permanent():
         backup_pos      = (backup_info['position']      if backup_info else 'OF').upper()
         backup_pos_type = (backup_info['position_type'] if backup_info else 'batter')
 
-        # Determine which canonical slot the backup should occupy.
-        # For pitchers: SP→SP-0/1/2..., RP→RP-0/1/2...
-        # For batters: use _POSITION_TO_SLOT mapping.
-        # We reuse the same logic as _auto_populate_permanents.
         def _slot_for(pos, pos_type, used_slots):
             if pos_type == 'pitcher':
                 candidates = [f'SP-{i}' for i in range(5)] if pos == 'SP' \
@@ -669,9 +724,8 @@ def swap_permanent():
             for c in candidates:
                 if c not in used_slots:
                     return c
-            return candidates[0]  # fall back to first if all taken
+            return candidates[0]
 
-        # Find all weeks where the old permanent player has a lineup row
         old_rows = db.execute('''
             SELECT week, position FROM lineups
             WHERE manager_id=? AND player_id=? AND is_permanent=1
@@ -681,7 +735,6 @@ def swap_permanent():
             wk       = row['week']
             old_slot = row['position']
 
-            # Get other occupied slots for this manager/week (excluding the old slot)
             occupied = db.execute('''
                 SELECT position FROM lineups
                 WHERE manager_id=? AND week=? AND position != ?
@@ -690,7 +743,6 @@ def swap_permanent():
 
             new_slot = _slot_for(backup_pos, backup_pos_type, used_slots)
 
-            # Remove the old slot and insert at the new correct slot
             db.execute('''
                 DELETE FROM lineups WHERE manager_id=? AND week=? AND position=?
             ''', (manager['id'], wk, old_slot))
@@ -702,7 +754,6 @@ def swap_permanent():
             ''', (manager['id'], wk, new_slot, backup_player['id']))
 
     else:
-        # Temporary: replace just this week's lineup slot
         slot = db.execute('''
             SELECT l.position FROM lineups l
             WHERE l.manager_id=? AND l.week=? AND l.player_id=? AND l.is_permanent=1
@@ -721,7 +772,7 @@ def swap_permanent():
 @app.route('/api/roster_search')
 def api_roster_search():
     q             = request.args.get('q', '').strip()
-    position_type = request.args.get('position_type', '')  # 'batter' or 'pitcher'
+    position_type = request.args.get('position_type', '')
     manager_name  = request.args.get('manager', '')
     week          = request.args.get('week', current_week(), type=int)
     limit         = min(int(request.args.get('limit', 15)), 50)
@@ -734,7 +785,6 @@ def api_roster_search():
 
     db = get_db()
 
-    # Build conflict sets
     used_by_this_manager     = set()
     used_this_week_by_other  = set()
     already_in_lineup        = set()
@@ -762,7 +812,6 @@ def api_roster_search():
             ''', (mgr['id'], week)).fetchall()
             already_in_lineup = {r['name'] for r in rows}
 
-            # Permanent players of the OTHER manager (cannot be selected)
             rows = db.execute('''
                 SELECT p.name FROM permanent_players pp
                 JOIN players p ON pp.player_id=p.id
@@ -770,9 +819,6 @@ def api_roster_search():
             ''', (mgr['id'],)).fetchall()
             other_manager_perms = {r['name'] for r in rows}
 
-    # For pitchers, normalise position into SP or RP for display,
-    # but don't filter — let any pitcher appear in any pitching slot.
-    # For batters, no position filtering at all.
     sql = '''
         SELECT mlb_id, name, team, position, position_type
         FROM mlb_roster
@@ -801,13 +847,13 @@ def api_roster_search():
             'conflict':      None,
         }
         if r['name'] in already_in_lineup:
-            entry['conflict'] = 'in_lineup'    # already in this lineup this week
+            entry['conflict'] = 'in_lineup'
         elif r['name'] in other_manager_perms:
-            entry['conflict'] = 'other_perm'   # permanent player of the other manager
+            entry['conflict'] = 'other_perm'
         elif r['name'] in used_by_this_manager:
-            entry['conflict'] = 'used'          # used in a prior week
+            entry['conflict'] = 'used'
         elif r['name'] in used_this_week_by_other:
-            entry['conflict'] = 'other_week'    # taken by other manager this week
+            entry['conflict'] = 'other_week'
         results.append(entry)
 
     return jsonify(results)
@@ -819,7 +865,6 @@ def api_roster_sync():
 
 @app.route('/api/stat_update', methods=['POST'])
 def api_stat_update():
-    """Manually trigger a stat update. Runs in background thread to avoid timeout."""
     import threading
     threading.Thread(target=run_stat_update, daemon=True).start()
     return jsonify({'success': True, 'message': 'Stat update started'})
@@ -833,7 +878,6 @@ def api_roster_last_updated():
 
 @app.route('/api/permanent_players/<manager_name>')
 def api_permanent_players(manager_name):
-    """Return active permanent players for a manager."""
     db = get_db()
     mgr = db.execute('SELECT id FROM managers WHERE name=?', (manager_name,)).fetchone()
     if not mgr:
@@ -854,23 +898,12 @@ def api_permanent_players(manager_name):
 
 # ── Category math ──────────────────────────────────────────────────────────────
 
-def _ip_display_to_true(ip_display):
-    """Convert display IP (6.2 = 6⅔ innings) to true decimal (6.667)."""
-    try:
-        val   = float(ip_display)
-        whole = int(val)
-        thirds = round((val - whole) * 10)
-        return whole + thirds / 3.0
-    except (TypeError, ValueError):
-        return 0.0
-
 def _compute_category_winners(data):
     managers = list(data.keys())
     if len(managers) < 2:
         return {}
 
     def val(r, field):
-        """Access a field from either a sqlite3.Row or a plain dict."""
         try:
             return r[field] or 0
         except (KeyError, IndexError, TypeError):
@@ -938,15 +971,13 @@ with app.app_context():
     try:
         db = get_db()
 
-        # Migration: add position_pinned column if this is an existing DB without it
         try:
             db.execute('ALTER TABLE mlb_roster ADD COLUMN position_pinned INTEGER DEFAULT 0')
             db.commit()
             print("[app] Migrated mlb_roster: added position_pinned column")
         except Exception:
-            pass  # column already exists — that's fine
+            pass
 
-        # Migration: remove duplicate permanent_players rows (keep lowest id per group)
         db.execute('''
             DELETE FROM permanent_players
             WHERE id NOT IN (
@@ -956,7 +987,6 @@ with app.app_context():
         ''')
         db.commit()
 
-        # Normalise any stale position values for non-pinned rows
         db.execute("UPDATE mlb_roster SET position='SP' WHERE position_type='pitcher' AND position='P' AND position_pinned=0")
         db.execute("UPDATE mlb_roster SET position='RP' WHERE position_type='pitcher' AND position IN ('CP','RL','CL','MR','SU','SW','RS') AND position_pinned=0")
         db.commit()
@@ -964,10 +994,6 @@ with app.app_context():
         count = db.execute('SELECT COUNT(*) as c FROM mlb_roster').fetchone()['c']
         db.close()
 
-        # Always sync on startup in a background thread.
-        # If the table already has data (e.g. from seed_db or a previous run) the
-        # sync is still safe — it uses ON CONFLICT DO UPDATE and respects position_pinned.
-        # This ensures the full ~900-player roster is always available for lineup search.
         if count < 100:
             print(f"[app] mlb_roster has {count} rows — running full sync now...")
         else:

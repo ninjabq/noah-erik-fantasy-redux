@@ -183,13 +183,21 @@
           {% if pitcher_map.get(slot) %}{% set _ = all_pitchers.append(pitcher_map[slot]) %}{% endif %}
         {% endfor %}
         {% if all_pitchers %}
-        {% set tot_ip  = all_pitchers|sum(attribute='ip') %}
+        {#
+          Use ip_to_true filter to convert display IP (e.g. 6.2 = 6⅔ inn) to true decimal
+          before dividing — this matches the category winner calculation in app.py
+          and prevents ERA/WHIP from being wrong when pitchers have partial innings.
+        #}
+        {% set true_ip_total = namespace(val=0.0) %}
+        {% for p in all_pitchers %}
+          {% set true_ip_total.val = true_ip_total.val + (p.ip | ip_to_true) %}
+        {% endfor %}
         {% set tot_er  = all_pitchers|sum(attribute='er') %}
         {% set tot_hbb = all_pitchers|sum(attribute='h_plus_bb') %}
         <tfoot>
           <tr class="totals-row">
             <td colspan="3">TOT</td>
-            <td>{{ '%.1f'|format(tot_ip) }}</td>
+            <td>{{ '%.1f'|format(all_pitchers|sum(attribute='ip')) }}</td>
             <td>{{ tot_er }}</td>
             <td>{{ all_pitchers|sum(attribute='h') }}</td>
             <td>{{ all_pitchers|sum(attribute='p_bb') }}</td>
@@ -197,10 +205,10 @@
             <td>{{ all_pitchers|sum(attribute='hd') }}</td>
             <td>{{ all_pitchers|sum(attribute='bs') }}</td>
             <td class="score-sep {{ cat_class('ERA', name) }}">
-              {{ '%.2f'|format(tot_er/tot_ip*9) if tot_ip else '—' }}
+              {{ '%.2f'|format(tot_er / true_ip_total.val * 9) if true_ip_total.val else '—' }}
             </td>
             <td class="{{ cat_class('WHIP', name) }}">
-              {{ '%.2f'|format(tot_hbb/tot_ip) if tot_ip else '—' }}
+              {{ '%.2f'|format(tot_hbb / true_ip_total.val) if true_ip_total.val else '—' }}
             </td>
             <td class="{{ cat_class('SO', name) }}">{{ all_pitchers|sum(attribute='so') }}</td>
             <td class="{{ cat_class('QS', name) }}">{{ all_pitchers|sum(attribute='qs') }}</td>
@@ -226,7 +234,6 @@ async function triggerStatUpdate(btn) {
     const data = await res.json();
     if (data.success) {
       btn.textContent = "✓ Started";
-      // Reload page after a few seconds to show new stats
       setTimeout(() => location.reload(), 4000);
     } else {
       btn.textContent = "Error";

@@ -82,12 +82,15 @@
     {% endif %}
   </section>
 
-  <!-- ── Today's stats ─────────────────────────────────────── -->
+  <!-- ── Today's / Yesterday's stats ──────────────────────── -->
   <section class="card today-card">
     <div class="today-header">
-      <h2 class="card-title">Today's Stats</h2>
+      <h2 class="card-title" id="today-card-title">Today's Stats</h2>
       <div class="today-meta">
-        <span class="live-dot"></span>
+        <button id="yesterday-btn" class="week-arrow update-btn" onclick="toggleYesterday()">
+          ← Yesterday
+        </button>
+        <span class="live-dot" id="live-dot"></span>
         <span id="today-updated">Loading…</span>
       </div>
     </div>
@@ -137,5 +140,48 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/today.js') }}"></script>
-<script>initTodayStats(60000);</script>
+<script>
+  let _showingYesterday = false;
+  let _todayInterval = null;
+
+  function toggleYesterday() {
+    _showingYesterday = !_showingYesterday;
+    const btn      = document.getElementById('yesterday-btn');
+    const title    = document.getElementById('today-card-title');
+    const liveDot  = document.getElementById('live-dot');
+
+    if (_showingYesterday) {
+      btn.textContent = '← Today';
+      title.textContent = "Yesterday's Stats";
+      liveDot.style.display = 'none';
+      clearInterval(_todayInterval);
+      fetchYesterday();
+    } else {
+      btn.textContent = '← Yesterday';
+      title.textContent = "Today's Stats";
+      liveDot.style.display = '';
+      fetchAndRender();
+      _todayInterval = setInterval(fetchAndRender, 60000);
+    }
+  }
+
+  async function fetchYesterday() {
+    const container = document.getElementById('today-container');
+    const updated   = document.getElementById('today-updated');
+    container.innerHTML = '<div class="today-loading">Fetching yesterday\'s data…</div>';
+    updated.textContent = 'Loading…';
+    try {
+      const res  = await fetch('/api/yesterday');
+      const json = await res.json();
+      renderToday(json.data);
+      updated.textContent = json.date + ' (final)';
+    } catch(e) {
+      container.innerHTML = '<div class="today-loading">Error loading yesterday\'s stats.</div>';
+      console.error('yesterday fetch error', e);
+    }
+  }
+
+  // Start live today stats with auto-refresh
+  _todayInterval = initTodayStats(60000);
+</script>
 {% endblock %}

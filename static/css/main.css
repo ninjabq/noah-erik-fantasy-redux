@@ -161,14 +161,18 @@ tr:hover td { background: rgba(255,255,255,.025); }
 }
 .scoreboard-managers {
   display: flex; align-items: center; justify-content: center;
-  gap: 3rem; position: relative;
+  gap: 5rem; position: relative;   /* increased from 3rem to prevent number collision */
 }
 .scoreboard-vs {
   font-family: var(--font-display);
   font-size: 2rem; color: var(--border-hi);
   position: absolute; left: 50%; transform: translateX(-50%);
+  pointer-events: none;
 }
-.scoreboard-manager { display: flex; flex-direction: column; align-items: center; }
+.scoreboard-manager {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 120px;   /* ensures number doesn't collapse into VS */
+}
 .mgr-name {
   font-family: var(--font-display);
   font-size: 1.6rem; letter-spacing: .1em;
@@ -179,6 +183,8 @@ tr:hover td { background: rgba(255,255,255,.025); }
   font-size: 5rem; line-height: 1;
   color: var(--text);
   text-shadow: 0 0 40px rgba(232,67,45,.2);
+  min-width: 3ch;           /* reserve space for up to 3 digits without reflow */
+  text-align: center;
 }
 .mgr-score.is-leading { color: var(--accent2); }
 
@@ -245,7 +251,8 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .cat-score-label { font-size: .65rem; color: var(--text-mute); }
 .cat-score-sep { color: var(--text-mute); font-size: .9rem; }
 
-/* ── Week page ───────────────────────────────────────────────────── */.page-week {}
+/* ── Week page ───────────────────────────────────────────────────── */
+.page-week {}
 .week-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1.5rem 0 1rem;
@@ -394,7 +401,7 @@ tr:hover td { background: rgba(255,255,255,.025); }
   margin-bottom: 1.25rem;
 }
 .today-header .card-title { margin-bottom: 0; }
-.today-meta { display: flex; align-items: center; gap: .5rem; }
+.today-meta { display: flex; align-items: center; gap: .75rem; }
 .live-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--green);
@@ -731,7 +738,7 @@ tr:hover td { background: rgba(255,255,255,.025); }
 @media (max-width: 900px) {
   .lineups-grid, .used-grid, .roster-grid,
   .today-managers, .perm-grids, .perm-cols { grid-template-columns: 1fr; }
-  .scoreboard-managers { gap: 2rem; }
+  .scoreboard-managers { gap: 3rem; }
   .mgr-score { font-size: 3.5rem; }
   .header-inner { padding: 0 1rem; }
   .site-main { padding: 1.5rem 1rem 3rem; }

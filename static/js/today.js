@@ -11,9 +11,13 @@ function slotDisplay(key) {
   return key ? key.split('-')[0] : '—';
 }
 
+/**
+ * Start auto-refreshing today's stats.
+ * Returns the interval handle so the caller can cancel it (e.g. when switching to yesterday).
+ */
 function initTodayStats(intervalMs = 60000) {
   fetchAndRender();
-  setInterval(fetchAndRender, intervalMs);
+  return setInterval(fetchAndRender, intervalMs);
 }
 
 async function fetchAndRender() {

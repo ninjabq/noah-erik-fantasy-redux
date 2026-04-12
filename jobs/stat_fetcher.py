@@ -35,9 +35,9 @@ MISSING_PLAYERS = {
     "Emmanuel Clase":     {"player_id": 667555, "team": "CLE"},
     "Cristopher Sanchez": {"player_id": 656945, "team": "PHI"},
     "Cristopher Sánchez": {"player_id": 656945, "team": "PHI"},
-    "Jhoan Duran":        {"player_id": 661858, "team": "MIN"},
+    "Jhoan Duran":        {"player_id": 661395, "team": "PHI"},  # fixed: was 661858 / MIN
     "Devin Williams":     {"player_id": 669203, "team": "NYY"},
-    "Mason Miller":       {"player_id": 694984, "team": "OAK"},
+    "Mason Miller":       {"player_id": 695243, "team": "SD"},   # fixed: was 694984 / OAK
     "Ranger Suarez":      {"player_id": 661482, "team": "PHI"},
     "Yoshinobu Yamamoto": {"player_id": 808982, "team": "LAD"},
     "Cole Ragans":        {"player_id": 669712, "team": "KC"},
@@ -189,6 +189,17 @@ def _today_et():
 def get_today_game_ids():
     today = _today_et().strftime('%Y-%m-%d')
     sched = mlb.get('schedule', {'date': today, 'sportId': 1})
+    ids = []
+    try:
+        for game in sched['dates'][0]['games']:
+            ids.append(game['gamePk'])
+    except (IndexError, KeyError):
+        pass
+    return ids
+
+def get_game_ids_for_date(date_str):
+    """Return game IDs for a specific date string (YYYY-MM-DD)."""
+    sched = mlb.get('schedule', {'date': date_str, 'sportId': 1})
     ids = []
     try:
         for game in sched['dates'][0]['games']:
@@ -485,16 +496,12 @@ def _update_category_wins(db, week, managers):
 
 # ── Today's stats update ───────────────────────────────────────────────────────
 
-def run_today_update():
-    """Fetch today-only stats for all players in the current week's lineup."""
-    print("[stat_fetcher] Updating today's stats...")
-    week = _current_week()
-    game_ids = get_today_game_ids()
-
-    db = get_db()
-    db.execute('DELETE FROM today_stats')
-
-    managers = db.execute('SELECT * FROM managers ORDER BY id').fetchall()
+def _fetch_stats_for_date(date_str, db, managers, week):
+    """
+    Core logic for fetching stats for a given date and writing to today_stats.
+    Used by both run_today_update (live) and run_yesterday_update (historical).
+    """
+    game_ids = get_game_ids_for_date(date_str)
 
     # Fetch all game data once
     game_info = {}       # gid -> (status, score, inning, away_abbr, home_abbr)
@@ -505,18 +512,19 @@ def run_today_update():
         bs, status, score, inning, away, home = get_live_boxscore(gid)
         game_info[gid] = (status, score, inning, away, home)
         live_boxscores[gid] = bs
-        # Index every player in this game by their ID key
         combined = {**bs.get('home', {}).get('players', {}),
                     **bs.get('away', {}).get('players', {})}
         for pid_key, pdata in combined.items():
             all_players_today[pid_key] = (pdata, gid)
 
-    # Build team -> game map for the "Off" check (no game today)
+    # Build team -> game map for the "Off" check
     team_to_game = {}
     for gid in game_ids:
         _, _, _, away, home = game_info[gid]
         team_to_game[away.upper()] = gid
         team_to_game[home.upper()] = gid
+
+    rows_written = []
 
     for manager in managers:
         lineup = db.execute('''
@@ -529,55 +537,101 @@ def run_today_update():
             key  = f"ID{slot['mlb_id']}"
             team = (slot['team'] or '').upper()
 
-            # Find which game this player appeared in (by mlb_id, not team)
             if key in all_players_today:
                 pdata, gid = all_players_today[key]
                 status, score, inning, away, home = game_info[gid]
                 opponent = home if team == away.upper() else away
             elif team in team_to_game:
-                # Player's team is playing but player didn't appear (DNP)
                 gid = team_to_game[team]
                 status, score, inning, away, home = game_info[gid]
                 opponent = home if team == away.upper() else away
                 pdata = None
             else:
-                # Team not playing today
-                db.execute('''
-                    INSERT OR REPLACE INTO today_stats
-                    (manager_id, player_id, game_status, opponent, game_score, inning)
-                    VALUES (?,?,'off','—','—','Off')
-                ''', (manager['id'], slot['player_id']))
+                rows_written.append((manager['id'], slot['player_id'], 'off', '—', '—', 'Off',
+                                     slot['position_type'], None))
                 continue
 
-            if slot['position_type'] == 'batter':
-                s = BatterStats()
-                if pdata:
-                    s.update(pdata.get('stats', {}))
-                db.execute('''
-                    INSERT OR REPLACE INTO today_stats
-                    (manager_id, player_id, game_status, opponent, game_score, inning,
-                     singles, doubles, triples, homeruns, ab, rbi, bb, sb, k)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ''', (
-                    manager['id'], slot['player_id'], status, opponent, score, inning,
-                    s.singles, s.doubles, s.triples, s.homeruns,
-                    s.ab, s.rbi, s.bb, s.sb, s.k
-                ))
-            else:
-                s = PitcherStats()
-                if pdata:
-                    s.update(pdata.get('stats', {}))
-                db.execute('''
-                    INSERT OR REPLACE INTO today_stats
-                    (manager_id, player_id, game_status, opponent, game_score, inning,
-                     ip, er, h, p_bb, sv, hd, bs, so, qs)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ''', (
-                    manager['id'], slot['player_id'], status, opponent, score, inning,
-                    s.ip_display, s.er, s.h, s.bb,
-                    s.sv, s.hd, s.bs, s.so, s.qs
-                ))
+            rows_written.append((manager['id'], slot['player_id'], status, opponent, score, inning,
+                                 slot['position_type'], pdata))
+
+    return rows_written
+
+def run_today_update():
+    """Fetch today-only stats for all players in the current week's lineup."""
+    print("[stat_fetcher] Updating today's stats...")
+    week = _current_week()
+    today_str = _today_et().strftime('%Y-%m-%d')
+
+    db = get_db()
+    db.execute('DELETE FROM today_stats')
+
+    managers = db.execute('SELECT * FROM managers ORDER BY id').fetchall()
+
+    rows = _fetch_stats_for_date(today_str, db, managers, week)
+    _write_today_rows(db, rows)
 
     db.commit()
     db.close()
     print("[stat_fetcher] Today's stats update complete.")
+
+def run_yesterday_update():
+    """Fetch yesterday's final stats for all players in the current week's lineup."""
+    from datetime import timedelta
+    print("[stat_fetcher] Fetching yesterday's stats...")
+    week = _current_week()
+    yesterday_str = (_today_et() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    db = get_db()
+    # Write to today_stats table (same table — UI reads from here)
+    db.execute('DELETE FROM today_stats')
+
+    managers = db.execute('SELECT * FROM managers ORDER BY id').fetchall()
+
+    rows = _fetch_stats_for_date(yesterday_str, db, managers, week)
+    _write_today_rows(db, rows)
+
+    db.commit()
+    db.close()
+    print("[stat_fetcher] Yesterday's stats fetch complete.")
+
+def _write_today_rows(db, rows):
+    """Write the list of player stat rows into today_stats."""
+    for row in rows:
+        manager_id, player_id, status, opponent, score, inning, pos_type, pdata = row
+
+        if status == 'off':
+            db.execute('''
+                INSERT OR REPLACE INTO today_stats
+                (manager_id, player_id, game_status, opponent, game_score, inning)
+                VALUES (?,?,'off','—','—','Off')
+            ''', (manager_id, player_id))
+            continue
+
+        if pos_type == 'batter':
+            s = BatterStats()
+            if pdata:
+                s.update(pdata.get('stats', {}))
+            db.execute('''
+                INSERT OR REPLACE INTO today_stats
+                (manager_id, player_id, game_status, opponent, game_score, inning,
+                 singles, doubles, triples, homeruns, ab, rbi, bb, sb, k)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                manager_id, player_id, status, opponent, score, inning,
+                s.singles, s.doubles, s.triples, s.homeruns,
+                s.ab, s.rbi, s.bb, s.sb, s.k
+            ))
+        else:
+            s = PitcherStats()
+            if pdata:
+                s.update(pdata.get('stats', {}))
+            db.execute('''
+                INSERT OR REPLACE INTO today_stats
+                (manager_id, player_id, game_status, opponent, game_score, inning,
+                 ip, er, h, p_bb, sv, hd, bs, so, qs)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                manager_id, player_id, status, opponent, score, inning,
+                s.ip_display, s.er, s.h, s.bb,
+                s.sv, s.hd, s.bs, s.so, s.qs
+            ))
