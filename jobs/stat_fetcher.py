@@ -378,8 +378,15 @@ def _display_ip_to_true(ip_display):
     except (TypeError, ValueError):
         return 0.0
 
-def run_stat_update():
-    week      = _sched_current_week()
+def run_stat_update(week=None):
+    """
+    Fetch and store cumulative stats for all lineup slots for the given week.
+    If week is None, defaults to the current week.
+    Passing an explicit week number allows historical recalculation (e.g. from
+    the /api/stat_update endpoint when the app has been down).
+    """
+    if week is None:
+        week = _sched_current_week()
     start_str, end_str = _sched_week_dates(week)
     print(f"[stat_fetcher] Updating week {week} ({start_str} – {end_str})")
 
@@ -600,6 +607,88 @@ def run_today_update():
         raise
     finally:
         db.close()   # ALWAYS released, even if MLB API or DB write fails
+
+def run_permanent_stats_update():
+    """
+    Daily job: fetch full-season stats for every permanent and backup player,
+    regardless of whether they appear in any lineup.  Writes into the
+    `permanent_stats` table (schema created by app.py on startup).
+
+    This is what powers the Season Stats table on the Roster page.
+    It runs the complete date range from the first week of the season through
+    today so results are always current even if the app was down for days.
+    """
+    from week_schedule import WEEKS
+    print("[stat_fetcher] Updating permanent player season stats...")
+
+    # Date range: season start → today
+    season_start = WEEKS[1][1].strftime('%Y-%m-%d')   # Week 1 start
+    season_end   = _today_et().strftime('%Y-%m-%d')
+
+    # Fetch all games for the full season-to-date — this is slow but runs only once/day
+    game_ids  = get_game_ids(season_start, season_end)
+    boxscores = get_boxscores(game_ids)
+
+    db = get_db()
+    try:
+        # Get all permanent/backup players with their mlb_id and position_type
+        perm_players = db.execute('''
+            SELECT DISTINCT p.id as player_id, p.mlb_id, p.position_type
+            FROM permanent_players pp
+            JOIN players p ON pp.player_id = p.id
+        ''').fetchall()
+
+        for player in perm_players:
+            stats = collect_stats_from_boxscores(
+                boxscores, player['mlb_id'], player['position_type']
+            )
+            if player['position_type'] == 'batter':
+                db.execute('''
+                    INSERT INTO permanent_stats
+                        (player_id, singles, doubles, triples, homeruns,
+                         ab, total_bases, slg, rbi, bb, sb, k)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(player_id) DO UPDATE SET
+                        singles=excluded.singles, doubles=excluded.doubles,
+                        triples=excluded.triples, homeruns=excluded.homeruns,
+                        ab=excluded.ab, total_bases=excluded.total_bases,
+                        slg=excluded.slg, rbi=excluded.rbi, bb=excluded.bb,
+                        sb=excluded.sb, k=excluded.k,
+                        last_updated=CURRENT_TIMESTAMP
+                ''', (
+                    player['player_id'],
+                    stats.singles, stats.doubles, stats.triples, stats.homeruns,
+                    stats.ab, stats.total_bases, round(stats.slg, 4),
+                    stats.rbi, stats.bb, stats.sb, stats.k
+                ))
+            else:
+                db.execute('''
+                    INSERT INTO permanent_stats
+                        (player_id, ip, er, h, p_bb, h_plus_bb,
+                         sv, hd, bs, era, whip, so, qs, sv_hd_bs)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(player_id) DO UPDATE SET
+                        ip=excluded.ip, er=excluded.er, h=excluded.h,
+                        p_bb=excluded.p_bb, h_plus_bb=excluded.h_plus_bb,
+                        sv=excluded.sv, hd=excluded.hd, bs=excluded.bs,
+                        era=excluded.era, whip=excluded.whip, so=excluded.so,
+                        qs=excluded.qs, sv_hd_bs=excluded.sv_hd_bs,
+                        last_updated=CURRENT_TIMESTAMP
+                ''', (
+                    player['player_id'],
+                    stats.ip_display, stats.er, stats.h, stats.bb,
+                    stats.h + stats.bb, stats.sv, stats.hd, stats.bs,
+                    round(stats.era, 4), round(stats.whip, 4),
+                    stats.so, stats.qs, stats.sv_hd_bs
+                ))
+
+        db.commit()
+        print(f"[stat_fetcher] Permanent stats update complete ({len(perm_players)} players).")
+    except Exception as e:
+        print(f"[stat_fetcher] run_permanent_stats_update error: {e}")
+        raise
+    finally:
+        db.close()
 
 def run_yesterday_update():
     """Fetch yesterday's final stats (used by /api/yesterday — does not persist)."""

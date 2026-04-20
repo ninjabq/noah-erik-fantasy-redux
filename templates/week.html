@@ -226,11 +226,14 @@
 {% block scripts %}
 <script>
 async function triggerStatUpdate(btn) {
-  const orig = btn.textContent;
   btn.textContent = "Updating…";
   btn.disabled = true;
   try {
-    const res  = await fetch("/api/stat_update", { method: "POST" });
+    const res  = await fetch("/api/stat_update", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ week: {{ n }} }),
+    });
     const data = await res.json();
     if (data.success) {
       btn.textContent = "✓ Started";

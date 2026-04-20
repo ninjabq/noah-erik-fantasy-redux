@@ -2,7 +2,7 @@ from flask import Flask, render_template, jsonify, request, abort
 from apscheduler.schedulers.background import BackgroundScheduler
 import sqlite3, os, json, unicodedata
 from datetime import datetime, date, timedelta
-from jobs.stat_fetcher import run_stat_update, run_today_update, run_yesterday_update, strip_accents
+from jobs.stat_fetcher import run_stat_update, run_today_update, run_yesterday_update, run_permanent_stats_update, strip_accents
 from jobs.roster_sync import sync_mlb_roster
 from week_schedule import current_week, week_dates, all_week_options, total_weeks, WEEKS
 
@@ -112,7 +112,13 @@ def _build_roster_season_stats(db, managers):
     """
     Returns roster_season: { manager_name: { 'batters': [...], 'pitchers': [...] } }
     Each player dict has their roster metadata + full-season aggregated stats.
-    Players appear under the manager who owns them.
+
+    Stats are read from the `permanent_stats` table, which is populated by the
+    daily `run_permanent_stats_update()` job.  This guarantees backup players
+    have stats even if they've never appeared in a lineup.
+
+    Falls back gracefully to zeros if the table is empty (e.g. first run before
+    the job has fired).
     """
     all_perm_rows = db.execute('''
         SELECT DISTINCT
@@ -132,36 +138,57 @@ def _build_roster_season_stats(db, managers):
         ORDER BY pp.manager_id, pp.is_backup, p.position_type, p.name
     ''').fetchall()
 
-    # Aggregate weekly stats per player (once each, reused across managers if needed)
+    # Pull stats from permanent_stats (keyed by player_id)
+    ps_rows = db.execute('SELECT * FROM permanent_stats').fetchall()
+    perm_stats_by_pid = {r['player_id']: dict(r) for r in ps_rows}
+
     season_stats = {}
     for row in all_perm_rows:
         pid = row['player_id']
         if pid in season_stats:
             continue
-        weekly_rows = db.execute('SELECT * FROM weekly_stats WHERE player_id=?', (pid,)).fetchall()
+
+        ps = perm_stats_by_pid.get(pid)
 
         if row['position_type'] == 'batter':
-            agg = dict(singles=0, doubles=0, triples=0, homeruns=0,
-                       ab=0, total_bases=0, rbi=0, bb=0, sb=0, k=0)
-            for wr in weekly_rows:
-                for f in agg:
-                    agg[f] += wr[f] or 0
+            if ps:
+                agg = {
+                    'singles':     ps['singles']     or 0,
+                    'doubles':     ps['doubles']     or 0,
+                    'triples':     ps['triples']     or 0,
+                    'homeruns':    ps['homeruns']    or 0,
+                    'ab':          ps['ab']          or 0,
+                    'total_bases': ps['total_bases'] or 0,
+                    'rbi':         ps['rbi']         or 0,
+                    'bb':          ps['bb']          or 0,
+                    'sb':          ps['sb']          or 0,
+                    'k':           ps['k']           or 0,
+                }
+            else:
+                agg = dict(singles=0, doubles=0, triples=0, homeruns=0,
+                           ab=0, total_bases=0, rbi=0, bb=0, sb=0, k=0)
             agg['hits'] = agg['singles'] + agg['doubles'] + agg['triples'] + agg['homeruns']
             agg['slg']  = round(agg['total_bases'] / agg['ab'], 3) if agg['ab'] else 0.0
         else:
-            true_ip = 0.0
-            agg = dict(er=0, h=0, p_bb=0, sv=0, hd=0, bs=0, so=0, qs=0, sv_hd_bs=0)
-            for wr in weekly_rows:
-                true_ip += _ip_display_to_true(wr['ip'] or 0)
-                for f in agg:
-                    agg[f] += wr[f] or 0
-            whole  = int(true_ip)
-            thirds = round((true_ip - whole) * 3)
-            if thirds == 3:
-                whole += 1; thirds = 0
-            agg['ip']   = whole + thirds * 0.1
-            agg['era']  = round(agg['er']  / true_ip * 9,          2) if true_ip else 0.0
-            agg['whip'] = round((agg['h'] + agg['p_bb']) / true_ip, 2) if true_ip else 0.0
+            if ps:
+                true_ip = _ip_display_to_true(ps['ip'] or 0)
+                agg = {
+                    'ip':       ps['ip']       or 0,
+                    'er':       ps['er']       or 0,
+                    'h':        ps['h']        or 0,
+                    'p_bb':     ps['p_bb']     or 0,
+                    'sv':       ps['sv']       or 0,
+                    'hd':       ps['hd']       or 0,
+                    'bs':       ps['bs']       or 0,
+                    'so':       ps['so']       or 0,
+                    'qs':       ps['qs']       or 0,
+                    'sv_hd_bs': ps['sv_hd_bs'] or 0,
+                    'era':      round(ps['er'] / true_ip * 9,                      2) if true_ip else 0.0,
+                    'whip':     round((ps['h'] + ps['p_bb']) / true_ip,            2) if true_ip else 0.0,
+                }
+            else:
+                agg = dict(ip=0, er=0, h=0, p_bb=0, sv=0, hd=0, bs=0,
+                           so=0, qs=0, sv_hd_bs=0, era=0.0, whip=0.0)
 
         season_stats[pid] = agg
 
@@ -653,9 +680,21 @@ def api_roster_sync():
 
 @app.route('/api/stat_update', methods=['POST'])
 def api_stat_update():
+    """
+    Trigger a stat update for a specific week (or the current week if not specified).
+    Accepts JSON body: { "week": <int> }
+    Runs in a background thread so the HTTP response returns immediately.
+    """
     import threading
-    threading.Thread(target=run_stat_update, daemon=True).start()
-    return jsonify({'success':True,'message':'Stat update started'})
+    data = request.get_json(silent=True) or {}
+    week = data.get('week')          # None → run_stat_update will use current_week()
+    if week is not None:
+        try:
+            week = int(week)
+        except (ValueError, TypeError):
+            week = None
+    threading.Thread(target=run_stat_update, args=(week,), daemon=True).start()
+    return jsonify({'success': True, 'message': f'Stat update started for week {week or "current"}'})
 
 @app.route('/api/roster_last_updated')
 def api_roster_last_updated():
@@ -727,7 +766,7 @@ scheduler = BackgroundScheduler()
 #                      set to half the interval so a briefly-delayed job still runs.
 scheduler.add_job(
     run_stat_update, 'interval', minutes=15, id='stat_update',
-    coalesce=True, max_instances=1, misfire_grace_time=450,  # 7.5 min
+    coalesce=True, max_instances=1, misfire_grace_time=450,
 )
 scheduler.add_job(
     run_today_update, 'interval', minutes=1, id='today_update',
@@ -735,6 +774,10 @@ scheduler.add_job(
 )
 scheduler.add_job(
     sync_mlb_roster, 'interval', hours=24, id='roster_sync',
+    coalesce=True, max_instances=1, misfire_grace_time=3600,
+)
+scheduler.add_job(
+    run_permanent_stats_update, 'interval', hours=24, id='permanent_stats',
     coalesce=True, max_instances=1, misfire_grace_time=3600,
 )
 scheduler.start()
@@ -746,16 +789,67 @@ with app.app_context():
             db.execute('ALTER TABLE mlb_roster ADD COLUMN position_pinned INTEGER DEFAULT 0')
             db.commit()
         except Exception: pass
-        db.execute('''DELETE FROM permanent_players WHERE id NOT IN (
-            SELECT MIN(id) FROM permanent_players GROUP BY manager_id,player_id,is_backup)''')
+
+        # Create permanent_stats table if it doesn't exist yet
+        db.executescript('''
+            CREATE TABLE IF NOT EXISTS permanent_stats (
+                player_id   INTEGER PRIMARY KEY REFERENCES players(id),
+                -- batter
+                singles     INTEGER DEFAULT 0,
+                doubles     INTEGER DEFAULT 0,
+                triples     INTEGER DEFAULT 0,
+                homeruns    INTEGER DEFAULT 0,
+                ab          INTEGER DEFAULT 0,
+                total_bases INTEGER DEFAULT 0,
+                slg         REAL    DEFAULT 0,
+                rbi         INTEGER DEFAULT 0,
+                bb          INTEGER DEFAULT 0,
+                sb          INTEGER DEFAULT 0,
+                k           INTEGER DEFAULT 0,
+                -- pitcher
+                ip          REAL    DEFAULT 0,
+                er          INTEGER DEFAULT 0,
+                h           INTEGER DEFAULT 0,
+                p_bb        INTEGER DEFAULT 0,
+                h_plus_bb   INTEGER DEFAULT 0,
+                sv          INTEGER DEFAULT 0,
+                hd          INTEGER DEFAULT 0,
+                bs          INTEGER DEFAULT 0,
+                era         REAL    DEFAULT 0,
+                whip        REAL    DEFAULT 0,
+                so          INTEGER DEFAULT 0,
+                qs          INTEGER DEFAULT 0,
+                sv_hd_bs    INTEGER DEFAULT 0,
+                last_updated TEXT
+            );
+        ''')
+        db.commit()
+
+        db.execute('''
+            DELETE FROM permanent_players
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM permanent_players GROUP BY manager_id,player_id,is_backup
+            )
+        ''')
         db.execute("UPDATE mlb_roster SET position='SP' WHERE position_type='pitcher' AND position='P' AND position_pinned=0")
         db.execute("UPDATE mlb_roster SET position='RP' WHERE position_type='pitcher' AND position IN ('CP','RL','CL','MR','SU','SW','RS') AND position_pinned=0")
         db.commit()
+
         count = db.execute('SELECT COUNT(*) as c FROM mlb_roster').fetchone()['c']
+        ps_count = db.execute('SELECT COUNT(*) as c FROM permanent_stats').fetchone()['c']
         db.close()
+
         print(f"[app] mlb_roster has {count} rows — refreshing in background...")
         import threading
         threading.Thread(target=sync_mlb_roster, daemon=True).start()
+
+        # Run permanent stats on startup if table is empty (first deploy or new table)
+        if ps_count == 0:
+            print("[app] permanent_stats is empty — running initial fetch in background...")
+            threading.Thread(target=run_permanent_stats_update, daemon=True).start()
+        else:
+            print(f"[app] permanent_stats has {ps_count} rows — daily job will refresh.")
+
     except Exception as e:
         print(f"[app] Startup error: {e}")
 
