@@ -10,8 +10,15 @@ app = Flask(__name__)
 DB_PATH = os.environ.get('DB_PATH', 'fantasy.db')
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    """
+    Open SQLite with WAL journal mode and a 30-second busy timeout.
+    WAL allows concurrent reads during writes; the timeout prevents instant
+    'database is locked' failures when a background job holds the write lock.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=30000')
     return conn
 
 def get_season_weeks():
@@ -712,9 +719,24 @@ def _compute_category_winners(data):
 # ── Scheduler ──────────────────────────────────────────────────────────────────
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(run_stat_update,  'interval', minutes=15, id='stat_update')
-scheduler.add_job(run_today_update, 'interval', minutes=1,  id='today_update')
-scheduler.add_job(sync_mlb_roster,  'interval', hours=24,   id='roster_sync')
+
+# coalesce=True  → if multiple firings were missed while the job was running,
+#                  only execute once when it becomes free (no pile-up).
+# max_instances=1 → never run two copies of the same job simultaneously.
+# misfire_grace_time → how many seconds late a job is still allowed to start;
+#                      set to half the interval so a briefly-delayed job still runs.
+scheduler.add_job(
+    run_stat_update, 'interval', minutes=15, id='stat_update',
+    coalesce=True, max_instances=1, misfire_grace_time=450,  # 7.5 min
+)
+scheduler.add_job(
+    run_today_update, 'interval', minutes=1, id='today_update',
+    coalesce=True, max_instances=1, misfire_grace_time=30,
+)
+scheduler.add_job(
+    sync_mlb_roster, 'interval', hours=24, id='roster_sync',
+    coalesce=True, max_instances=1, misfire_grace_time=3600,
+)
 scheduler.start()
 
 with app.app_context():
