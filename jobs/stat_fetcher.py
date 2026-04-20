@@ -3,8 +3,9 @@ Background job that replaces AWS Lambda + Google Sheets backend.
 Fetches MLB stats via mlbstatsapi / statsapi and writes to SQLite.
 """
 
-import os, sqlite3, unicodedata, signal
+import os, sqlite3, unicodedata
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
 from datetime import datetime, timedelta, date
 
 import statsapi as mlb
@@ -65,31 +66,34 @@ TEAM_OVERRIDES = {
     "Nacho Alvarez Jr.": "WAS",
 }
 
-# ── Timeout helper (Unix only; no-op on Windows) ───────────────────────────────
+# ── Timeout helper ─────────────────────────────────────────────────────────────
 
 class _TimeoutError(Exception):
     pass
 
+def _call_with_timeout(seconds, label, fn, *args, **kwargs):
+    """
+    Run fn(*args, **kwargs) in a ThreadPoolExecutor and raise _TimeoutError if
+    it doesn't complete within `seconds`.  Works from any thread (APScheduler
+    workers, Flask threads, daemon threads) — unlike SIGALRM which only works
+    on the main thread of the main interpreter.
+    """
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(fn, *args, **kwargs)
+        try:
+            return future.result(timeout=seconds)
+        except _FuturesTimeout:
+            raise _TimeoutError(f"{label} timed out after {seconds}s")
+
 @contextmanager
 def _timeout(seconds, label='operation'):
     """
-    Context manager that raises _TimeoutError if the block takes longer than
-    `seconds`.  Uses SIGALRM so it only works on Unix (Linux/macOS).
-    On Windows it is a no-op — Railway runs Linux so this is fine.
+    No-op context manager kept for call-site compatibility.
+    Actual per-call timeouts are enforced via _call_with_timeout() inside
+    each API helper below.
     """
-    try:
-        def _handler(signum, frame):
-            raise _TimeoutError(f"{label} timed out after {seconds}s")
-        old = signal.signal(signal.SIGALRM, _handler)
-        signal.alarm(seconds)
-        try:
-            yield
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old)
-    except AttributeError:
-        # Windows — SIGALRM not available, just yield without timeout
-        yield
+    yield
+
 
 # ── Unicode helpers ────────────────────────────────────────────────────────────
 
@@ -123,11 +127,11 @@ def get_db():
 
 def _team_for_pid(pid, name):
     try:
-        with _timeout(API_TIMEOUT, 'team lookup'):
-            team_code = mlb.lookup_team(
+        def _fetch():
+            return mlb.lookup_team(
                 mlb.player_stat_data(pid)['current_team']
             )[0]['fileCode'].upper()
-        return team_code
+        return _call_with_timeout(API_TIMEOUT, 'team lookup', _fetch)
     except (IndexError, KeyError, _TimeoutError):
         return TEAM_OVERRIDES.get(name, 'N/A')
 
@@ -138,8 +142,8 @@ def get_player_id_and_team(name):
 
     for variant in name_variants(name):
         try:
-            with _timeout(API_TIMEOUT, f'mlbstatsapi lookup {variant}'):
-                results = mlb2.Mlb().get_people_id(variant)
+            results = _call_with_timeout(API_TIMEOUT, f'mlbstatsapi lookup {variant}',
+                                         mlb2.Mlb().get_people_id, variant)
             if results:
                 pid = results[0]
                 return pid, _team_for_pid(pid, name)
@@ -148,8 +152,8 @@ def get_player_id_and_team(name):
 
     stripped = strip_accents(name)
     try:
-        with _timeout(API_TIMEOUT, f'statsapi lookup {stripped}'):
-            results = mlb.lookup_player(stripped)
+        results = _call_with_timeout(API_TIMEOUT, f'statsapi lookup {stripped}',
+                                     mlb.lookup_player, stripped)
         if results:
             pid = results[0]['id']
             return pid, _team_for_pid(pid, name)
@@ -184,8 +188,8 @@ def get_game_ids(start_date_str, end_date_str, include_spring_training=False):
         date_str = current.strftime('%Y-%m-%d')
         for sport_id in sport_ids:
             try:
-                with _timeout(API_TIMEOUT, f'schedule fetch {date_str}'):
-                    sched = mlb.get('schedule', {'date': date_str, 'sportId': sport_id})
+                sched = _call_with_timeout(API_TIMEOUT, f'schedule fetch {date_str}',
+                                           mlb.get, 'schedule', {'date': date_str, 'sportId': sport_id})
                 for game in sched['dates'][0]['games']:
                     gid = game['gamePk']
                     if gid not in game_ids:
@@ -199,8 +203,8 @@ def get_game_ids(start_date_str, end_date_str, include_spring_training=False):
 
 def get_game_ids_for_date(date_str):
     try:
-        with _timeout(API_TIMEOUT, f'schedule fetch {date_str}'):
-            sched = mlb.get('schedule', {'date': date_str, 'sportId': 1})
+        sched = _call_with_timeout(API_TIMEOUT, f'schedule fetch {date_str}',
+                                   mlb.get, 'schedule', {'date': date_str, 'sportId': 1})
         ids = []
         for game in sched['dates'][0]['games']:
             ids.append(game['gamePk'])
@@ -215,8 +219,8 @@ def get_boxscores(game_ids):
     boxscores = []
     for gid in game_ids:
         try:
-            with _timeout(API_TIMEOUT, f'boxscore {gid}'):
-                boxscores.append(mlb.boxscore_data(gid))
+            boxscores.append(_call_with_timeout(API_TIMEOUT, f'boxscore {gid}',
+                                                mlb.boxscore_data, gid))
         except _TimeoutError:
             print(f"[stat_fetcher] Boxscore fetch timed out for game {gid} — skipping")
         except Exception as e:
@@ -239,15 +243,15 @@ def _today_et():
 
 def get_live_boxscore(game_id):
     try:
-        with _timeout(API_TIMEOUT, f'boxscore_data {game_id}'):
-            data = mlb.boxscore_data(game_id)
+        data = _call_with_timeout(API_TIMEOUT, f'boxscore_data {game_id}',
+                                  mlb.boxscore_data, game_id)
     except _TimeoutError:
         print(f"[stat_fetcher] boxscore_data timed out for {game_id}")
         data = {}
 
     try:
-        with _timeout(API_TIMEOUT, f'game live {game_id}'):
-            live = mlb.get('game', {'gamePk': game_id})
+        live = _call_with_timeout(API_TIMEOUT, f'game live {game_id}',
+                                  mlb.get, 'game', {'gamePk': game_id})
         status    = live['gameData']['status']['abstractGameState']
         linescore = live['liveData']['linescore']
         inning_num  = linescore.get('currentInning', '')
