@@ -63,6 +63,12 @@ _POSITION_TO_SLOT = {
 
 def _auto_populate_permanents(db, managers, week_num):
     for m in managers:
+        # Players temporarily sat out for this specific week
+        temp_sat_out = {r['player_id'] for r in db.execute(
+            'SELECT player_id FROM temporary_swaps WHERE manager_id=? AND week=?',
+            (m['id'], week_num)
+        )}
+
         perm_rows = db.execute('''
             SELECT p.id as player_id, p.name, p.position_type,
                 COALESCE(
@@ -81,6 +87,10 @@ def _auto_populate_permanents(db, managers, week_num):
         sp_idx = of_idx = 0
 
         for row in perm_rows:
+            # Skip players sat out via a temporary swap this week
+            if row['player_id'] in temp_sat_out:
+                continue
+
             pos      = (row['position'] or '').upper()
             pos_type = row['position_type']
             if pos_type == 'pitcher':
@@ -631,9 +641,32 @@ def swap_permanent():
                 VALUES (?,?,?,?,1) ON CONFLICT(manager_id,week,position) DO UPDATE SET
                 player_id=excluded.player_id,is_permanent=1''',(manager['id'],wk,new,bp['id']))
     else:
-        slot = db.execute('SELECT position FROM lineups WHERE manager_id=? AND week=? AND player_id=? AND is_permanent=1',(manager['id'],week,pp['id'])).fetchone()
+        # Temporary swap: replace the permanent player's slot with the backup
+        # for this week only.  Record the sat-out permanent player in
+        # temporary_swaps so _auto_populate_permanents doesn't re-insert them.
+        slot = db.execute(
+            'SELECT position FROM lineups WHERE manager_id=? AND week=? AND player_id=? AND is_permanent=1',
+            (manager['id'], week, pp['id'])
+        ).fetchone()
         if slot:
-            db.execute('UPDATE lineups SET player_id=?,is_permanent=1 WHERE manager_id=? AND week=? AND position=?',(bp['id'],manager['id'],week,slot['position']))
+            # Replace the slot with the backup player (keep is_permanent=1 so
+            # it shows with the gold star and isn't counted as a temp pick)
+            db.execute(
+                'UPDATE lineups SET player_id=?, is_permanent=1 WHERE manager_id=? AND week=? AND position=?',
+                (bp['id'], manager['id'], week, slot['position'])
+            )
+        else:
+            # Permanent player wasn't in the lineup yet (edge case: swap before
+            # auto-populate ran). Just remove any stale entry for them.
+            db.execute(
+                'DELETE FROM lineups WHERE manager_id=? AND week=? AND player_id=?',
+                (manager['id'], week, pp['id'])
+            )
+        # Record that this permanent player is sat out for this week
+        db.execute('''
+            INSERT OR REPLACE INTO temporary_swaps (manager_id, week, player_id)
+            VALUES (?, ?, ?)
+        ''', (manager['id'], week, pp['id']))
 
     db.commit(); db.close()
     return jsonify({'success':True,'swap_type':swap_type})
@@ -821,6 +854,14 @@ with app.app_context():
                 qs          INTEGER DEFAULT 0,
                 sv_hd_bs    INTEGER DEFAULT 0,
                 last_updated TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS temporary_swaps (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                manager_id  INTEGER NOT NULL REFERENCES managers(id),
+                week        INTEGER NOT NULL,
+                player_id   INTEGER NOT NULL REFERENCES players(id),
+                UNIQUE(manager_id, week, player_id)
             );
         ''')
         db.commit()
