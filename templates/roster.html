@@ -30,6 +30,12 @@
             <span class="rp-team">{{ p.team }}</span>
             {% if p.has_been_swapped %}
               <span class="swap-badge">Swapped Out</span>
+              <button class="undo-swap-btn"
+                data-manager="{{ manager }}"
+                data-permanent="{{ p.name }}"
+                data-pos-type="{{ p.position_type }}">
+                Undo ↩
+              </button>
             {% else %}
               <button class="swap-trigger-btn"
                 data-manager="{{ manager }}"
@@ -291,10 +297,32 @@
     </div>
   </div>
 </div>
+{# ── Undo swap modal ─────────────────────────────────────────────── #}
+<div id="undo-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">Undo Permanent Swap</div>
+    <div class="modal-body">
+      <p>Restoring: <strong id="undo-perm-name"></strong></p>
+      <div class="modal-field">
+        <label class="modal-label">Remove from lineup:</label>
+        <select id="undo-backup-select" class="week-jump-select"></select>
+      </div>
+      <p style="font-size:.82rem; color:var(--text-dim); margin-top:.75rem">
+        This will restore <strong id="undo-perm-name-2"></strong> as a permanent player
+        and return the selected player to backup status. All lineup weeks will be updated.
+      </p>
+    </div>
+    <div class="modal-actions">
+      <button id="undo-confirm-btn" class="btn-confirm">Confirm Undo</button>
+      <button id="undo-cancel-btn" class="btn-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+// ── Swap modal ────────────────────────────────────────────────────────────────
 const modal      = document.getElementById('swap-modal');
 const permLabel  = document.getElementById('swap-perm-name');
 const backupSel  = document.getElementById('swap-backup-select');
@@ -370,6 +398,78 @@ confirmBtn.addEventListener('click', async () => {
     else alert('Swap failed: ' + (data.reason || 'unknown error'));
   } catch(e) { alert('Network error'); }
   finally { confirmBtn.textContent = 'Confirm Swap'; confirmBtn.disabled = false; }
+});
+
+// ── Undo swap modal ───────────────────────────────────────────────────────────
+const undoModal      = document.getElementById('undo-modal');
+const undoPermLabel  = document.getElementById('undo-perm-name');
+const undoPermLabel2 = document.getElementById('undo-perm-name-2');
+const undoBackupSel  = document.getElementById('undo-backup-select');
+const undoConfirmBtn = document.getElementById('undo-confirm-btn');
+const undoCancelBtn  = document.getElementById('undo-cancel-btn');
+let _undoMgr = '', _undoPerm = '';
+
+document.querySelectorAll('.undo-swap-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _undoMgr  = btn.dataset.manager;
+    _undoPerm = btn.dataset.permanent;
+    const posType = btn.dataset.posType;
+
+    undoPermLabel.textContent  = _undoPerm;
+    undoPermLabel2.textContent = _undoPerm;
+
+    // Populate with activated backups (has 'Active' badge) of the same pos type
+    undoBackupSel.innerHTML = '';
+    document.querySelectorAll(`.roster-player.backup[data-manager="${_undoMgr}"]`).forEach(row => {
+      if (!row.querySelector('.swap-badge.active')) return;   // only activated backups
+      const posSpan = row.querySelector('.rp-pos');
+      const rowPos  = posSpan ? posSpan.textContent.trim() : '';
+      const rowType = (rowPos === 'SP' || rowPos === 'RP') ? 'pitcher' : 'batter';
+      if (rowType !== posType) return;
+      const name = row.dataset.player;
+      const opt  = document.createElement('option');
+      opt.value  = name;
+      opt.textContent = `${name} (${rowPos})`;
+      undoBackupSel.appendChild(opt);
+    });
+
+    if (!undoBackupSel.options.length) {
+      const opt = document.createElement('option');
+      opt.textContent = 'No activated backups found';
+      opt.disabled = true;
+      undoBackupSel.appendChild(opt);
+      undoConfirmBtn.disabled = true;
+    } else {
+      undoConfirmBtn.disabled = false;
+    }
+
+    undoModal.style.display = 'flex';
+  });
+});
+
+undoCancelBtn.addEventListener('click', () => { undoModal.style.display = 'none'; });
+undoModal.addEventListener('click', e => { if (e.target === undoModal) undoModal.style.display = 'none'; });
+
+undoConfirmBtn.addEventListener('click', async () => {
+  const backupName = undoBackupSel.value;
+  if (!backupName) return;
+  undoConfirmBtn.textContent = 'Saving…';
+  undoConfirmBtn.disabled = true;
+  try {
+    const res  = await fetch('/api/undo_swap', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        manager: _undoMgr,
+        permanent_player: _undoPerm,
+        backup_player: backupName,
+      }),
+    });
+    const data = await res.json();
+    if (data.success) { undoModal.style.display = 'none'; location.reload(); }
+    else alert('Undo failed: ' + (data.reason || 'unknown error'));
+  } catch(e) { alert('Network error'); }
+  finally { undoConfirmBtn.textContent = 'Confirm Undo'; undoConfirmBtn.disabled = false; }
 });
 </script>
 {% endblock %}

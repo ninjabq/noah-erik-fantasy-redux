@@ -69,6 +69,8 @@ def _auto_populate_permanents(db, managers, week_num):
             (m['id'], week_num)
         )}
 
+        # Active roster for auto-populate = original permanents still active
+        # OR backup players who have been permanently promoted (is_backup=1, has_been_swapped=1).
         perm_rows = db.execute('''
             SELECT p.id as player_id, p.name, p.position_type,
                 COALESCE(
@@ -77,7 +79,11 @@ def _auto_populate_permanents(db, managers, week_num):
                 ) as position
             FROM permanent_players pp
             JOIN players p ON pp.player_id = p.id
-            WHERE pp.manager_id = ? AND pp.is_backup = 0 AND pp.has_been_swapped = 0
+            WHERE pp.manager_id = ?
+              AND (
+                  (pp.is_backup = 0 AND pp.has_been_swapped = 0)
+                  OR (pp.is_backup = 1 AND pp.has_been_swapped = 1)
+              )
             GROUP BY p.id
         ''', (m['id'],)).fetchall()
 
@@ -670,6 +676,58 @@ def swap_permanent():
 
     db.commit(); db.close()
     return jsonify({'success':True,'swap_type':swap_type})
+
+@app.route('/api/undo_swap', methods=['POST'])
+def undo_swap():
+    """
+    Undo a permanent swap: restore the original permanent player and
+    return the backup to available status.
+
+    Steps:
+      1. Reset has_been_swapped=0 on both players in permanent_players.
+      2. In lineups, replace every is_permanent=1 row that contains the
+         backup player with the original permanent player (same slot).
+         Auto-populate will handle any future weeks not yet in lineups.
+    """
+    data         = request.json
+    manager_name = data.get('manager')
+    perm_name    = data.get('permanent_player')   # the player who was swapped OUT
+    backup_name  = data.get('backup_player')       # the player who was swapped IN
+
+    db = get_db()
+    manager = db.execute('SELECT id FROM managers WHERE name=?', (manager_name,)).fetchone()
+    pp      = db.execute('SELECT id FROM players WHERE name=?', (perm_name,)).fetchone()
+    bp      = db.execute('SELECT id FROM players WHERE name=?', (backup_name,)).fetchone()
+
+    if not manager or not pp or not bp:
+        db.close()
+        return jsonify({'success': False, 'reason': 'Player or manager not found'})
+
+    # Replace the backup with the permanent in all permanent lineup slots
+    rows = db.execute('''
+        SELECT week, position FROM lineups
+        WHERE manager_id=? AND player_id=? AND is_permanent=1
+    ''', (manager['id'], bp['id'])).fetchall()
+
+    for row in rows:
+        db.execute('''
+            UPDATE lineups SET player_id=?
+            WHERE manager_id=? AND week=? AND position=?
+        ''', (pp['id'], manager['id'], row['week'], row['position']))
+
+    # Reset both players' swap flags
+    db.execute('''
+        UPDATE permanent_players SET has_been_swapped=0
+        WHERE manager_id=? AND player_id=?
+    ''', (manager['id'], pp['id']))
+    db.execute('''
+        UPDATE permanent_players SET has_been_swapped=0
+        WHERE manager_id=? AND player_id=?
+    ''', (manager['id'], bp['id']))
+
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
 
 @app.route('/api/roster_search')
 def api_roster_search():
